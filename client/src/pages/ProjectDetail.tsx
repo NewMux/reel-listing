@@ -1,0 +1,69 @@
+import { ArrowLeft, CheckCircle2, Clock3, Copy, Download, FileVideo, Link2, Loader2, Share2 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+import { useLocation, useRoute } from "wouter";
+import { AppSidebar, StatusPill } from "@/components/AppChrome";
+import { copy, useLocale } from "@/lib/locale";
+import { trpc } from "@/lib/trpc";
+
+type ProjectCopy = {
+  reviewEstimate: string;
+  processingEstimate: string;
+  doneEstimate: string;
+  uploadingEstimate: string;
+};
+
+function estimate(status: string, t: ProjectCopy) {
+  return status === "Review" ? t.reviewEstimate : status === "Processing" ? t.processingEstimate : status === "Done" ? t.doneEstimate : t.uploadingEstimate;
+}
+
+export default function ProjectDetail() {
+  const { locale } = useLocale();
+  const t = copy[locale];
+  const [, params] = useRoute("/projects/:id");
+  const id = Number(params?.id);
+  const [, setLocation] = useLocation();
+  const project = trpc.projects.get.useQuery({ id }, { enabled: Number.isSafeInteger(id) });
+  const utils = trpc.useUtils();
+  const complete = trpc.projects.complete.useMutation({
+    onSuccess: () => {
+      utils.projects.get.invalidate({ id });
+      utils.projects.list.invalidate();
+      toast.success(locale === "en" ? "Demo render is ready for delivery" : "أصبح عرض التجربة جاهزاً للتسليم");
+    },
+    onError: error => toast.error(error.message),
+  });
+  const canDeliver = project.data?.status === "Done" && !!project.data.finalVideoUrl;
+  const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
+
+  const share = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      const message = locale === "en" ? "Project link copied — ready to share." : "تم نسخ رابط المشروع وهو جاهز للمشاركة.";
+      setDeliveryNotice(message);
+      toast.success(message);
+    } catch (error) {
+      toast.error(locale === "en" ? "Could not share this project" : "تعذرت مشاركة المشروع");
+    }
+  };
+
+  const download = () => {
+    if (!canDeliver) {
+      toast.error(locale === "en" ? "The final video is not ready yet" : "الفيديو النهائي غير جاهز بعد");
+      return;
+    }
+    const message = locale === "en" ? "Your final video is opening now." : "جارٍ فتح الفيديو النهائي الآن.";
+    setDeliveryNotice(message);
+    toast.success(message);
+  };
+
+  const completeDemo = () => {
+    complete.mutate({ id, finalVideoUrl: "/manus-storage/vistaflow-demo-final_adcb2313.mp4" });
+  };
+
+  if (project.isLoading) return <AppSidebar><div className="p-10 text-sm text-[#65746B]">{t.common.loading}</div></AppSidebar>;
+  if (!project.data) return <AppSidebar><div className="p-10 text-sm text-[#65746B]">Project not found.</div></AppSidebar>;
+  const data = project.data;
+
+  return <AppSidebar><main className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 lg:px-10 lg:py-12"><button onClick={() => setLocation("/dashboard")} className="inline-flex items-center gap-2 text-sm font-semibold text-[#63756A] hover:text-[#11251E]"><ArrowLeft size={16}/>{t.project.back}</button><div className="mt-8 grid gap-8 lg:grid-cols-[1.1fr_.9fr]"><div><div className="flex flex-wrap items-center gap-3"><StatusPill status={data.status}/><p className="text-xs font-semibold text-[#728177]">{data.location}</p></div><h1 className="serif mt-3 text-5xl tracking-[-.05em]">{data.title}</h1>{data.description && <p className="mt-4 max-w-[580px] text-sm leading-7 text-[#65756B]">{data.description}</p>}<div className="mt-8 overflow-hidden rounded-[27px] bg-[#DFE7D7]">{canDeliver ? <video src={data.finalVideoUrl!} controls className="aspect-video w-full bg-[#10291f]"/> : <div className="grid aspect-video place-items-center p-8 text-center"><span className={`grid h-14 w-14 place-items-center rounded-full ${data.status === "Processing" ? "bg-white text-[#426D3D]" : "bg-[#CFE1A5] text-[#4F7524]"}`}>{data.status === "Processing" ? <Loader2 className="animate-spin" size={23}/> : data.status === "Done" ? <CheckCircle2 size={24}/> : <FileVideo size={24}/>}</span><p className="mt-4 text-sm font-bold text-[#31513C]">{estimate(data.status, t.project)}</p><p className="mt-1 text-xs text-[#657A6B]">{t.project.unavailable}</p></div>}</div></div><aside className="rounded-[27px] border border-[#11251E]/10 bg-white p-6 shadow-[0_16px_40px_rgba(17,37,30,.05)]"><p className="text-xs font-bold uppercase tracking-[.15em] text-[#6E8249]">{t.project.delivery}</p><h2 className="serif mt-3 text-3xl tracking-[-.04em]">{t.project.overview}</h2><div className="mt-7 rounded-2xl bg-[#F1F3E9] p-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white text-[#496B3F]"><Clock3 size={17}/></span><div><p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#758079]">{t.project.estimate}</p><p className="mt-0.5 text-sm font-bold text-[#2C4738]">{estimate(data.status, t.project)}</p></div></div></div>{deliveryNotice && <div role="status" className="mt-4 rounded-2xl border border-[#B7D27F] bg-[#F3F8E6] px-4 py-3 text-sm font-semibold leading-6 text-[#45672B]">{deliveryNotice}</div>}{data.revisionNotes && <div className="mt-4 rounded-2xl border border-[#E2D5BC] bg-[#FFF8ED] p-4"><p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#846F4D]">{t.project.requestNotes}</p><p className="mt-2 text-sm leading-6 text-[#6D604C]">{data.revisionNotes}</p></div>}{data.status === "Processing" && <div className="mt-4 rounded-2xl border border-dashed border-[#86A355] bg-[#F4F7EA] p-4"><p className="text-xs font-bold text-[#496C35]">{locale === "en" ? "Demo render control" : "تحكم عرض التجربة"}</p><p className="mt-1 text-xs leading-5 text-[#70806E]">{locale === "en" ? "Use this preview-only control to complete the sample delivery flow." : "استخدم عنصر المعاينة هذا لإكمال مسار التسليم التجريبي."}</p><button disabled={complete.isPending} onClick={completeDemo} className="mt-3 flex h-9 w-full items-center justify-center rounded-lg bg-[#D8E9B2] text-xs font-bold text-[#35511A] disabled:opacity-55">{complete.isPending ? t.common.loading : locale === "en" ? "Finish demo render" : "إنهاء عرض التجربة"}</button></div>}<div className="mt-6 grid gap-2">{canDeliver ? <a onClick={event => { event.preventDefault(); download(); window.setTimeout(() => { window.location.href = data.finalVideoUrl!; }, 1600); }} href={data.finalVideoUrl!} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[#11251E] text-sm font-bold text-white"><Download size={16}/>{t.project.download}</a> : <button onClick={download} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[#E6E9E1] text-sm font-bold text-[#97A097]"><Download size={16}/>{t.project.download}</button>}<button onClick={share} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[#11251E]/12 text-sm font-bold text-[#355041] hover:bg-[#F5F6EF]"><Share2 size={16}/>{t.project.share}</button></div><div className="mt-6 flex items-center gap-2 border-t border-[#11251E]/8 pt-5 text-xs text-[#7A877F]"><Link2 size={14}/>{locale === "en" ? "Private project link" : "رابط مشروع خاص"}<Copy size={13} className="ms-auto"/></div></aside></div></main></AppSidebar>;
+}

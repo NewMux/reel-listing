@@ -1,0 +1,31 @@
+# Project TODO
+
+- [x] Establish bilingual English/Arabic app content, locale switcher, and layout-level RTL handling.
+- [x] Define and migrate persistent video-project records with exact status labels: Uploading, Processing, Review, Done.
+- [x] Implement Manus OAuth-protected dashboard routes and account-aware navigation.
+- [x] Build premium landing page with hero, feature highlights, process steps, and conversion calls to action.
+- [x] Build pricing page with Starter, Pro, and Agency plans plus a comparison table.
+- [x] Build Terms of Service and Privacy Policy pages.
+- [x] Implement video/media upload with drag-and-drop, progress feedback, metadata, and server validation.
+- [x] Implement a project review-and-confirm flow with approve and request-changes states.
+- [x] Implement project-detail delivery with generation status, estimated completion, download, and sharing actions.
+- [x] Deliver responsive mobile-first layouts, empty states, accessibility, and refined micro-interactions.
+- [x] Add and run Vitest coverage for project validation and status behavior.
+- [x] Visually verify desktop and mobile layouts, resolve issues, and save the final checkpoint.
+- [x] Add granular client upload preparation progress and a visible progress indicator.
+- [x] Render playable video media previews during review and preserve playback controls.
+- [x] Implement a clear completion path that sets a final video URL and enables delivery actions.
+- [x] Add user-facing success and error feedback for share and download actions.
+- [x] Add Vitest coverage for project approval, change requests, and exact status transitions.
+- [x] Re-run validation, review completed checklist items, and save the final checkpoint.
+- [x] Add an authenticated demo completion control that transitions a Processing project to Done with a downloadable final-video asset.
+- [x] Verify a reachable Done state plus successful share and download feedback.
+- [x] Replace one large base64 media submission with an authenticated, size-bounded chunked upload session to avoid gateway rejection and complete the live project creation flow.
+- [x] Exercise completed-project Share and Download actions in the live browser and capture their success feedback.
+- [x] Document the implemented authenticated chunked-upload-session approach accurately in the project checklist.
+- [x] Surface explicit in-app success feedback after native Share completes and before Download navigation begins.
+- [x] Re-exercise both completed-project delivery actions and capture their visible success notifications.
+- [x] Add a persistent in-app delivery confirmation and prefer copy-link sharing so success evidence remains observable in the completed project UI.
+- [x] Restart the development service, confirm the stale module-import error is cleared, and rerun validation.
+- [x] Save the final project checkpoint and confirm the completed checklist state.
+- [x] Re-run tests and type checks after the restart, then verify a normal browser page load remains free of the stale import error.
