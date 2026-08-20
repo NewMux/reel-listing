@@ -29,3 +29,15 @@
 - [x] Restart the development service, confirm the stale module-import error is cleared, and rerun validation.
 - [x] Save the final project checkpoint and confirm the completed checklist state.
 - [x] Re-run tests and type checks after the restart, then verify a normal browser page load remains free of the stale import error.
+- [ ] Select a production video-generation API suited to real-estate walkthrough output, latency, controls, and cost.
+- [ ] Define the durable render-job, callback/polling, storage, and usage-entitlement integration plan for the selected provider.
+- [ ] Require and validate exactly 10 property photos for the production clip-generation workflow.
+- [ ] Generate one 10-second image-to-video clip per uploaded property photo with a controlled shot prompt.
+- [ ] Assemble the 10 ordered clips into one approximately 100-second final listing video with branded transitions, music, and a call to action.
+- [ ] Track per-clip generation state, retries, render cost, and final composition progress in the dashboard.
+- [ ] Define the five completed-listing entitlement for the 35 BHD package, including a clear billing period and renewal rule.
+- [ ] Enforce one 10-photo, 10-clip production workflow per paid listing and prevent unapproved extra render costs.
+- [ ] Add usage tracking for included listings, retries, and paid rerender allowances.
+- [ ] Model direct production cost, payment fees, and gross profit for the 35 BHD five-listing package.
+- [ ] Review the uploaded AI property video platform business plan and align its assumptions with VistaFlow’s product, pricing, and implementation roadmap.
+- [ ] Commit and push the completed VistaFlow project and business-plan analysis to NewMux/reel-listing.
