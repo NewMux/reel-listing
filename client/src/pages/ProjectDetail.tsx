@@ -8,7 +8,7 @@ import { trpc } from "@/lib/trpc";
 
 function estimate(status: string, locale: "en" | "ar") {
   if (status === "Review") return locale === "en" ? "Awaiting your approval" : "بانتظار موافقتك";
-  if (status === "Processing") return locale === "en" ? "About 8 minutes" : "حوالي 8 دقائق";
+  if (status === "Processing") return locale === "en" ? "Manual delivery (Pilot)" : "تسليم يدوي (تجريبي)";
   if (status === "Done") return locale === "en" ? "Ready for delivery" : "جاهز للتسليم";
   return locale === "en" ? "Securing your media" : "جارٍ تأمين وسائطك";
 }
@@ -85,7 +85,7 @@ export default function ProjectDetail() {
             <p className="text-xs font-bold uppercase tracking-[.15em] text-[#6E8249]">{t.project.delivery}</p>
             <h2 className="serif mt-3 text-3xl tracking-[-.04em]">{t.project.overview}</h2>
             <div className="mt-7 rounded-2xl bg-[#F1F3E9] p-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white text-[#496B3F]"><Clock3 size={17} /></span><div><p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#758079]">{t.project.estimate}</p><p className="mt-0.5 text-sm font-bold text-[#2C4738]">{estimate(displayStatus, locale)}</p></div></div></div>
-            {displayStatus === "Processing" && <div className="mt-4 rounded-2xl border border-[#C9D9AD] bg-[#F3F8E8] p-4"><div className="flex items-center gap-2 text-xs font-bold text-[#496C35]"><Sparkles size={15} />{locale === "en" ? "Hands-off production" : "إنتاج تلقائي"}</div><p className="mt-2 text-xs leading-5 text-[#70806E]">{locale === "en" ? "VistaFlow is analyzing each frame, generating ten clips, then assembling the final reel with clean crossfades." : "يقوم VistaFlow بتحليل كل إطار وتوليد عشرة مقاطع ثم تجميع الفيلم النهائي بانتقالات سلسة."}</p></div>}
+            {displayStatus === "Processing" && <div className="mt-4 rounded-2xl border border-[#C9D9AD] bg-[#F3F8E8] p-4"><div className="flex items-center gap-2 text-xs font-bold text-[#496C35]"><Sparkles size={15} />{locale === "en" ? "Pilot Production" : "إنتاج تجريبي"}</div><p className="mt-2 text-xs leading-5 text-[#70806E]">{locale === "en" ? "Your photos have been received. Because this is a private pilot, your reel is being processed manually and will be sent to you directly." : "تم استلام صورك. نظراً لأن هذا إصدار تجريبي خاص، تتم معالجة فيلمك يدوياً وسيتم إرساله إليك مباشرة."}</p></div>}
             {canDeliver && <div className="mt-4 rounded-2xl border border-[#B7D27F] bg-[#F3F8E6] px-4 py-3 text-sm font-semibold leading-6 text-[#45672B]"><div className="flex items-center gap-2"><CheckCircle2 size={16} />{locale === "en" ? "Your final reel is ready." : "فيلمك النهائي جاهز."}</div></div>}
             {deliveryNotice && <div role="status" className="mt-4 rounded-2xl border border-[#B7D27F] bg-[#F3F8E6] px-4 py-3 text-sm font-semibold leading-6 text-[#45672B]">{deliveryNotice}</div>}
             {data.revisionNotes && <div className="mt-4 rounded-2xl border border-[#E2D5BC] bg-[#FFF8ED] p-4"><p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#846F4D]">{t.project.requestNotes}</p><p className="mt-2 text-sm leading-6 text-[#6D604C]">{data.revisionNotes}</p></div>}

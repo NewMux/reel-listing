@@ -177,23 +177,15 @@ async function runRenderJob(job: RenderJob) {
     }
 
     job.phase = "assembly";
-    job.currentStep = "Stitching clips with clean crossfades…";
+    job.currentStep = "Your AI generation is queued. Because this is a private pilot, your final video will be delivered manually.";
     job.overallProgress = 92;
-    await wait(650);
-    job.phase = "complete";
-    job.status = "Done";
-    job.overallProgress = 100;
-    job.currentStep = "Your reel is ready to share.";
-    job.finalVideoUrl = FINAL_PREVIEW_URL;
-
-    try {
-      await updateVideoProject(job.userId, job.projectId, {
-        status: "Done",
-        finalVideoUrl: FINAL_PREVIEW_URL,
-      });
-    } catch (error) {
-      console.warn("[Render] Preview completed in memory; project persistence was unavailable.", error);
-    }
+    
+    // For the private pilot, we do NOT complete the job automatically.
+    // We leave it in the Processing/assembly state so the user knows it is being handled manually.
+    // The admin will download the photos, run the Python script, and deliver the MP4 directly.
+    await updateVideoProject(job.userId, job.projectId, {
+      status: "Processing",
+    });
   } catch (error) {
     job.status = "Failed";
     job.phase = "failed";
