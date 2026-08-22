@@ -1,7 +1,6 @@
 import {
-  MAX_PROPERTY_IMAGES,
   MAX_PROPERTY_MEDIA_BYTES,
-  MIN_PROPERTY_IMAGES,
+  REQUIRED_PROPERTY_IMAGES,
   projectStatuses,
 } from "../shared/video";
 
@@ -9,8 +8,6 @@ export const acceptedMediaTypes = [
   "image/jpeg",
   "image/png",
   "image/webp",
-  "video/mp4",
-  "video/quicktime",
 ] as const;
 
 export type UploadCandidate = {
@@ -36,26 +33,19 @@ export function decodeBase64Media(data: string): Buffer {
 
 export function validatePropertyMedia(files: UploadCandidate[]) {
   if (files.length === 0) throw new Error("Add property media to continue.");
-  if (files.length > MAX_PROPERTY_IMAGES) {
-    throw new Error(`You can upload a maximum of ${MAX_PROPERTY_IMAGES} images.`);
+  if (files.length !== REQUIRED_PROPERTY_IMAGES) {
+    throw new Error(`Upload exactly ${REQUIRED_PROPERTY_IMAGES} property images.`);
   }
 
   const hasVideo = files.some(file => file.type.startsWith("video/"));
-  const hasImage = files.some(file => file.type.startsWith("image/"));
-  if (hasVideo && hasImage) {
-    throw new Error("Upload either one walkthrough video or a set of property images, not both.");
-  }
-  if (hasVideo && files.length !== 1) {
-    throw new Error("Upload one walkthrough video at a time.");
-  }
-  if (hasImage && files.length < MIN_PROPERTY_IMAGES) {
-    throw new Error(`Add at least ${MIN_PROPERTY_IMAGES} property images to continue.`);
+  if (hasVideo) {
+    throw new Error("Upload exactly 10 property images. Walkthrough videos are no longer accepted.");
   }
 
   let totalBytes = 0;
   for (const file of files) {
     if (!acceptedMediaTypes.includes(file.type as (typeof acceptedMediaTypes)[number])) {
-      throw new Error("Use JPG, PNG, WEBP, MP4, or MOV media files.");
+      throw new Error("Use JPG, PNG, or WEBP image files.");
     }
     const bytes = decodeBase64Media(file.base64);
     totalBytes += bytes.byteLength;
@@ -65,37 +55,30 @@ export function validatePropertyMedia(files: UploadCandidate[]) {
     throw new Error("Keep the combined upload size under 25 MB.");
   }
 
-  return { totalBytes, isVideo: hasVideo };
+  return { totalBytes, isVideo: false };
 }
 
 export function validateUploadedPropertyMedia(files: UploadedMedia[]) {
   if (files.length === 0) throw new Error("Add property media to continue.");
-  if (files.length > MAX_PROPERTY_IMAGES) {
-    throw new Error(`You can upload a maximum of ${MAX_PROPERTY_IMAGES} images.`);
+  if (files.length !== REQUIRED_PROPERTY_IMAGES) {
+    throw new Error(`Upload exactly ${REQUIRED_PROPERTY_IMAGES} property images.`);
   }
 
   const hasVideo = files.some(file => file.type.startsWith("video/"));
-  const hasImage = files.some(file => file.type.startsWith("image/"));
-  if (hasVideo && hasImage) {
-    throw new Error("Upload either one walkthrough video or a set of property images, not both.");
-  }
-  if (hasVideo && files.length !== 1) {
-    throw new Error("Upload one walkthrough video at a time.");
-  }
-  if (hasImage && files.length < MIN_PROPERTY_IMAGES) {
-    throw new Error(`Add at least ${MIN_PROPERTY_IMAGES} property images to continue.`);
+  if (hasVideo) {
+    throw new Error("Upload exactly 10 property images. Walkthrough videos are no longer accepted.");
   }
 
   for (const file of files) {
     if (!acceptedMediaTypes.includes(file.type as (typeof acceptedMediaTypes)[number])) {
-      throw new Error("Use JPG, PNG, WEBP, MP4, or MOV media files.");
+      throw new Error("Use JPG, PNG, or WEBP image files.");
     }
     if (!file.key.startsWith("property-projects/") || !file.url.startsWith("/manus-storage/")) {
       throw new Error("Property media must be uploaded securely before creating a project.");
     }
   }
 
-  return { isVideo: hasVideo };
+  return { isVideo: false };
 }
 
 export function isProjectStatus(value: string): value is (typeof projectStatuses)[number] {

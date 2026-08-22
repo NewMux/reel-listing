@@ -13,6 +13,7 @@ import {
 } from "./projects";
 import { storageCreatePutTarget } from "./storage";
 import { appendUploadChunk, createUploadSession, finalizeUploadSession } from "./uploadSessions";
+import { getRenderStatus, startRenderJob } from "./renderPipeline";
 
 const fileSchema = z.object({
   name: z.string().min(1).max(240),
@@ -84,7 +85,9 @@ export const appRouter = router({
       const project = await getVideoProject(ctx.user.id, input.id);
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
       try {
-        return updateVideoProject(ctx.user.id, input.id, getApprovalTransition(project.status));
+        const updated = await updateVideoProject(ctx.user.id, input.id, getApprovalTransition(project.status));
+        const render = startRenderJob(ctx.user.id, input.id, project.mediaUrls);
+        return { project: updated, render };
       } catch (error) {
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to approve this project." });
       }
@@ -100,6 +103,14 @@ export const appRouter = router({
         } catch (error) {
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to save changes." });
         }
+      }),
+    renderStatus: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        projectIdInput(input.id);
+        const project = await getVideoProject(ctx.user.id, input.id);
+        if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+        return getRenderStatus(input.id, project.status, project.mediaUrls, project.finalVideoUrl);
       }),
     complete: protectedProcedure
       .input(z.object({ id: z.number().int().positive(), finalVideoUrl: z.string().min(1).max(2_000) }))
@@ -145,9 +156,9 @@ export const appRouter = router({
     createUploadTarget: protectedProcedure
       .input(z.object({ name: z.string().trim().min(1).max(240), type: z.string().min(1).max(100) }))
       .mutation(async ({ ctx, input }) => {
-        const allowedTypes = ["image/jpeg", "image/png", "image/webp", "video/mp4", "video/quicktime"];
+        const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
         if (!allowedTypes.includes(input.type)) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Use JPG, PNG, WEBP, MP4, or MOV media files." });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Use JPG, PNG, or WEBP image files." });
         }
         const safeName = input.name.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/-+/g, "-");
         return storageCreatePutTarget(`property-projects/${ctx.user.id}/${Date.now()}-${safeName}`);

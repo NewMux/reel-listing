@@ -36,8 +36,8 @@ function getOwnedSession(userId: number, uploadId: string) {
 
 export function createUploadSession(userId: number, name: string, type: string, totalBytes: number) {
   cleanExpiredSessions();
-  if (!acceptedMediaTypes.includes(type as (typeof acceptedMediaTypes)[number])) {
-    throw new Error("Use JPG, PNG, WEBP, MP4, or MOV media files.");
+  if (!["image/jpeg", "image/png", "image/webp"].includes(type)) {
+    throw new Error("Use JPG, PNG, or WEBP image files.");
   }
   if (!Number.isSafeInteger(totalBytes) || totalBytes < 1 || totalBytes > MAX_MEDIA_BYTES) {
     throw new Error("Keep the combined upload size under 25 MB.");

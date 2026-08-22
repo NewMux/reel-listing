@@ -9,5 +9,4 @@ export type ProjectMedia = {
 };
 
 export const MAX_PROPERTY_MEDIA_BYTES = 25 * 1024 * 1024;
-export const MIN_PROPERTY_IMAGES = 3;
-export const MAX_PROPERTY_IMAGES = 10;
+export const REQUIRED_PROPERTY_IMAGES = 10;

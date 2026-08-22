@@ -11,32 +11,29 @@ import { appendUploadChunk, createUploadSession } from "./uploadSessions";
 const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
 describe("property media validation", () => {
-  it("requires at least three images when images are uploaded", () => {
+  it("requires exactly ten images", () => {
     expect(() =>
       validatePropertyMedia([
         { name: "one.png", type: "image/png", base64: pixel },
         { name: "two.png", type: "image/png", base64: pixel },
       ]),
-    ).toThrow("at least 3");
+    ).toThrow("Upload exactly 10 property images.");
   });
 
-  it("accepts three property images", () => {
+  it("accepts ten property images", () => {
     expect(
-      validatePropertyMedia([
-        { name: "one.png", type: "image/png", base64: pixel },
-        { name: "two.png", type: "image/png", base64: pixel },
-        { name: "three.png", type: "image/png", base64: pixel },
-      ]),
+      validatePropertyMedia(
+        Array.from({ length: 10 }).map((_, i) => ({ name: `${i}.png`, type: "image/png", base64: pixel }))
+      ),
     ).toMatchObject({ isVideo: false });
   });
 
-  it("rejects a mixed collection of video and images", () => {
+  it("rejects video uploads", () => {
     expect(() =>
-      validatePropertyMedia([
-        { name: "walkthrough.mp4", type: "video/mp4", base64: pixel },
-        { name: "one.png", type: "image/png", base64: pixel },
-      ]),
-    ).toThrow("either one walkthrough video or a set of property images");
+      validatePropertyMedia(
+        Array.from({ length: 10 }).map((_, i) => ({ name: `${i}.mp4`, type: "video/mp4", base64: pixel }))
+      ),
+    ).toThrow("Upload exactly 10 property images. Walkthrough videos are no longer accepted.");
   });
 
   it("preserves the required project status vocabulary and review transition", () => {
@@ -58,7 +55,7 @@ describe("property media validation", () => {
   });
 
   it("accepts bounded authenticated upload chunks and accounts for their bytes", () => {
-    const session = createUploadSession(42, "villa.mp4", "video/mp4", 3);
+    const session = createUploadSession(42, "villa.jpg", "image/jpeg", 3);
     expect(appendUploadChunk(42, session.id, "QUJD")).toEqual({ receivedBytes: 3, totalBytes: 3 });
     expect(() => appendUploadChunk(41, session.id, "QQ==")).toThrow("expired");
   });
