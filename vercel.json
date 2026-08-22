@@ -2,5 +2,22 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "pnpm build",
   "outputDirectory": "dist/public",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 10
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/[...path].ts"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
 }
