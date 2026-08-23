@@ -7,7 +7,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { registerProjectMediaUpload } from "../mediaUpload";
-import { serveStatic, setupVite } from "./vite";
+import { serveStatic } from "./static";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -46,6 +46,7 @@ export function createApp() {
 export async function createConfiguredApp(server?: Server) {
   const app = createApp();
   if (process.env.NODE_ENV === "development") {
+    const { setupVite } = await import("./vite");
     await setupVite(app, server ?? createServer(app));
   } else {
     serveStatic(app);
