@@ -12,18 +12,6 @@ const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 type LocalFile = { file: File; preview: string };
 type UploadedMedia = { name: string; type: string; key: string; url: string };
 
-function readChunkBase64(blob: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== "string") return reject(new Error("Unable to read file chunk."));
-      resolve(reader.result.split(",")[1] || "");
-    };
-    reader.onerror = () => reject(new Error("Unable to read file chunk."));
-    reader.readAsDataURL(blob);
-  });
-}
-
 export default function NewProject() {
   const { locale } = useLocale();
   const t = copy[locale];
@@ -36,9 +24,7 @@ export default function NewProject() {
   const [dragging, setDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const startUpload = trpc.media.createUploadSession.useMutation();
-  const appendChunk = trpc.media.appendUploadChunk.useMutation();
-  const finalizeUpload = trpc.media.finalizeUploadSession.useMutation();
+  const createUploadTarget = trpc.media.createUploadTarget.useMutation();
   const create = trpc.projects.create.useMutation({
     onSuccess: data => {
       setUploadProgress(100);
@@ -94,18 +80,12 @@ export default function NewProject() {
       const uploads: UploadedMedia[] = [];
 
       for (const item of files) {
-        const session = await startUpload.mutateAsync({
-          name: item.file.name,
-          type: item.file.type,
-          totalBytes: item.file.size,
-        });
-        for (let offset = 0; offset < item.file.size; offset += session.chunkSize) {
-          const chunk = await readChunkBase64(item.file.slice(offset, Math.min(offset + session.chunkSize, item.file.size)));
-          const progress = await appendChunk.mutateAsync({ uploadId: session.id, chunk });
-          setUploadProgress(Math.min(88, Math.round(((completeBytes + progress.receivedBytes) / totalBytes) * 88)));
-        }
-        uploads.push(await finalizeUpload.mutateAsync({ uploadId: session.id }));
+        const target = await createUploadTarget.mutateAsync({ name: item.file.name, type: item.file.type });
+        const upload = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": item.file.type }, body: item.file });
+        if (!upload.ok) throw new Error(`Upload failed (${upload.status}). Please try again.`);
+        uploads.push({ name: item.file.name, type: item.file.type, key: target.key, url: target.url });
         completeBytes += item.file.size;
+        setUploadProgress(Math.min(88, Math.round((completeBytes / totalBytes) * 88)));
       }
 
       setUploadProgress(92);
@@ -121,7 +101,7 @@ export default function NewProject() {
     }
   };
 
-  const isBusy = create.isPending || startUpload.isPending || appendChunk.isPending || finalizeUpload.isPending;
+  const isBusy = create.isPending || createUploadTarget.isPending;
   const isReady = files.length > 0;
 
   return (
