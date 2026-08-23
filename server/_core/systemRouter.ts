@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { notifyOwner } from "./notification";
 import { adminProcedure, publicProcedure, router } from "./trpc";
+import { FAL_IMAGE_TO_VIDEO_MODEL } from "../../shared/video";
 
 export const systemRouter = router({
   health: publicProcedure
@@ -11,6 +12,7 @@ export const systemRouter = router({
     )
     .query(() => ({
       ok: true,
+      videoModel: FAL_IMAGE_TO_VIDEO_MODEL,
     })),
 
   notifyOwner: adminProcedure
