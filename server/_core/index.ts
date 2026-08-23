@@ -1,12 +1,6 @@
-import express from "express";
 import { createServer, type Server } from "http";
 import net from "net";
-import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
-import { registerStorageProxy } from "./storageProxy";
-import { appRouter } from "../routers";
-import { createContext } from "./context";
-import { registerProjectMediaUpload } from "../mediaUpload";
+import { createApiApp } from "./api";
 import { serveStatic } from "./static";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -27,20 +21,7 @@ async function findAvailablePort(startPort = 3000): Promise<number> {
 }
 
 export function createApp() {
-  const app = express();
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  registerStorageProxy(app);
-  registerOAuthRoutes(app);
-  registerProjectMediaUpload(app);
-  app.use(
-    "/api/trpc",
-    createExpressMiddleware({
-      router: appRouter,
-      createContext,
-    }),
-  );
-  return app;
+  return createApiApp();
 }
 
 export async function createConfiguredApp(server?: Server) {
