@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { MAX_PROPERTY_MEDIA_BYTES, MAX_PROPERTY_PHOTOS } from "../shared/video";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -52,7 +53,7 @@ export const appRouter = router({
           title: z.string().trim().min(2).max(160),
           description: z.string().trim().max(1_000).optional(),
           location: z.string().trim().min(2).max(180),
-          files: z.array(fileSchema).min(1).max(10),
+          files: z.array(fileSchema).min(1).max(MAX_PROPERTY_PHOTOS),
         }),
       )
       .mutation(async ({ ctx, input }) => {
@@ -127,7 +128,7 @@ export const appRouter = router({
   }),
   media: router({
     createUploadSession: protectedProcedure
-      .input(z.object({ name: z.string().trim().min(1).max(240), type: z.string().min(1).max(100), totalBytes: z.number().int().positive().max(25 * 1024 * 1024) }))
+      .input(z.object({ name: z.string().trim().min(1).max(240), type: z.string().min(1).max(100), totalBytes: z.number().int().positive().max(MAX_PROPERTY_MEDIA_BYTES) }))
       .mutation(({ ctx, input }) => {
         try {
           return createUploadSession(ctx.user.id, input.name, input.type, input.totalBytes);
@@ -156,12 +157,12 @@ export const appRouter = router({
     createUploadTarget: protectedProcedure
       .input(z.object({ name: z.string().trim().min(1).max(240), type: z.string().min(1).max(100) }))
       .mutation(async ({ ctx, input }) => {
-        const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+        const allowedTypes = ["image/jpeg", "image/png", "image/webp", "video/webm", "video/mp4"];
         if (!allowedTypes.includes(input.type)) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Use JPG, PNG, or WEBP image files." });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Use JPG, PNG, WEBP, WEBM, or MP4 media files." });
         }
         const safeName = input.name.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/-+/g, "-");
-        return storageCreatePutTarget(`property-projects/${ctx.user.id}/${Date.now()}-${safeName}`);
+        return storageCreatePutTarget(`property-projects/${ctx.user.id}/outputs/${Date.now()}-${safeName}`);
       }),
   }),
 });

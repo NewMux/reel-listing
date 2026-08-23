@@ -1,11 +1,11 @@
-import { ChangeEvent, DragEvent, useRef, useState } from "react";
+import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { AlertCircle, ArrowLeft, Check, ImagePlus, Loader2, MapPin, X } from "lucide-react";
 import { useLocation } from "wouter";
 import { AppSidebar } from "@/components/AppChrome";
 import { copy, useLocale } from "@/lib/locale";
 import { trpc } from "@/lib/trpc";
 
-const REQUIRED_PHOTOS = 10;
+const MAX_PHOTOS = 10;
 const MAX_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
@@ -59,7 +59,7 @@ export default function NewProject() {
       ...files,
       ...accepted.map(file => ({ file, preview: URL.createObjectURL(file) })),
     ];
-    if (merged.length > REQUIRED_PHOTOS) return setError(`You can upload a maximum of ${REQUIRED_PHOTOS} photos.`);
+    if (merged.length > MAX_PHOTOS) return setError(`You can upload up to ${MAX_PHOTOS} photos.`);
     if (merged.reduce((sum, item) => sum + item.file.size, 0) > MAX_BYTES) {
       return setError("Keep the combined upload size under 25 MB.");
     }
@@ -85,7 +85,7 @@ export default function NewProject() {
   const submit = async () => {
     setError("");
     if (!title.trim() || !location.trim()) return setError("Add a property title and location to continue.");
-    if (files.length !== REQUIRED_PHOTOS) return setError(`Upload exactly ${REQUIRED_PHOTOS} property photos to continue.`);
+    if (files.length === 0) return setError("Add at least one property photo to continue.");
 
     try {
       setUploadProgress(0);
@@ -122,8 +122,7 @@ export default function NewProject() {
   };
 
   const isBusy = create.isPending || startUpload.isPending || appendChunk.isPending || finalizeUpload.isPending;
-  const isReady = files.length === REQUIRED_PHOTOS;
-  const remaining = REQUIRED_PHOTOS - files.length;
+  const isReady = files.length > 0;
 
   return (
     <AppSidebar>
@@ -143,13 +142,13 @@ export default function NewProject() {
               <div className="flex items-start gap-3">
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#D8E9B2] text-[#436515]"><ImagePlus size={17} /></span>
                 <div>
-                  <p className="text-sm font-bold text-[#31503B]">{locale === "en" ? "Ten frames, one clear story" : "عشر لقطات، قصة واضحة واحدة"}</p>
-                  <p className="mt-2 text-sm leading-6 text-[#6B7C70]">{locale === "en" ? "We turn each photo into a cinematic 10-second clip, then stitch the sequence into one polished reel." : "نحوّل كل صورة إلى مقطع سينمائي مدته 10 ثوانٍ، ثم نرتّب اللقطات في فيلم واحد راقٍ."}</p>
+                  <p className="text-sm font-bold text-[#31503B]">{locale === "en" ? "Up to ten frames, one clear story" : "حتى عشر لقطات، قصة واضحة واحدة"}</p>
+                  <p className="mt-2 text-sm leading-6 text-[#6B7C70]">{locale === "en" ? "We turn each photo into a cinematic 10-second segment, then stitch every segment into one polished reel." : "نحوّل كل صورة إلى مقطع سينمائي مدته 10 ثوانٍ، ثم نرتّب جميع المقاطع في فيلم واحد راقٍ."}</p>
                 </div>
               </div>
               <div className="mt-5 flex items-center gap-2 text-xs font-bold text-[#52712F]">
                 <Check size={15} />
-                {locale === "en" ? "Your order is preserved in the final edit" : "سيتم الحفاظ على ترتيبك في المونتاج النهائي"}
+                {locale === "en" ? "Your upload order is preserved in the final edit" : "سيتم الحفاظ على ترتيب الصور في المونتاج النهائي"}
               </div>
             </div>
           </div>
@@ -161,7 +160,7 @@ export default function NewProject() {
                 <p className="mt-1 text-xs leading-5 text-[#758178]">{t.upload.mediaHint}</p>
               </div>
               <div className={`rounded-full px-3 py-1.5 text-xs font-bold ${isReady ? "bg-[#D8E9B2] text-[#416221]" : "bg-[#F3F0E7] text-[#796B4E]"}`}>
-                {files.length}/{REQUIRED_PHOTOS} {isReady ? t.upload.photoCountReady : `${remaining} ${t.upload.photoCountRemaining}`}
+                {files.length}/{MAX_PHOTOS} {locale === "en" ? "photos" : "صور"}
               </div>
             </div>
 
@@ -176,7 +175,7 @@ export default function NewProject() {
               <div>
                 <span className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-[#D8E9B2] text-[#456A26]"><ImagePlus size={19} /></span>
                 <p className="mt-3 text-sm font-bold text-[#2A4437]">{t.upload.drop}</p>
-                <p className="mt-1 text-xs text-[#758178]">{t.upload.browse} · {locale === "en" ? "10 photos required" : "مطلوب 10 صور"}</p>
+                <p className="mt-1 text-xs text-[#758178]">{t.upload.browse} · {locale === "en" ? "up to 10 photos" : "حتى 10 صور"}</p>
               </div>
             </div>
 

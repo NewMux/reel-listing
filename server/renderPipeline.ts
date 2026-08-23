@@ -1,21 +1,6 @@
-import { updateVideoProject } from "./db";
+export const CINEMATIC_CLIP_SECONDS = 10;
 
-export const FINAL_PREVIEW_URL = "/manus-storage/vistaflow-demo-final_adcb2313.mp4";
-
-const SHOT_BLUEPRINTS = [
-  { roomType: "Exterior", prompt: "Slow cinematic rise revealing the facade, warm golden-hour light." },
-  { roomType: "Living room", prompt: "Gentle push-in across the living space, soft afternoon light." },
-  { roomType: "Kitchen", prompt: "Measured pan across the kitchen surfaces, bright natural light." },
-  { roomType: "Dining room", prompt: "Smooth lateral move past the dining setting, calm editorial light." },
-  { roomType: "Primary bedroom", prompt: "Slow dolly toward the window, quiet morning light." },
-  { roomType: "Bathroom", prompt: "Subtle floating camera movement, clean reflective light." },
-  { roomType: "Outdoor living", prompt: "Slow arc around the terrace, late-afternoon warmth." },
-  { roomType: "View", prompt: "Steady reveal toward the horizon, airy blue-hour atmosphere." },
-  { roomType: "Detail", prompt: "Close, delicate drift across the architectural detail, soft contrast." },
-  { roomType: "Closing frame", prompt: "Unhurried pull-back to the hero composition, polished twilight light." },
-] as const;
-
-type ShotState = "queued" | "analyzing" | "ready" | "generating" | "complete";
+type ShotState = "queued" | "rendering" | "complete";
 
 type Shot = {
   index: number;
@@ -31,10 +16,9 @@ type RenderJob = {
   projectId: number;
   userId: number;
   status: "Processing" | "Done" | "Failed";
-  phase: "analysis" | "generation" | "assembly" | "complete" | "failed";
+  phase: "generation" | "assembly" | "complete" | "failed";
   currentStep: string;
   overallProgress: number;
-  startedAt: number;
   finalVideoUrl: string | null;
   shots: Shot[];
 };
@@ -53,17 +37,23 @@ export type RenderStatusSnapshot = {
 
 const jobs = new Map<number, RenderJob>();
 
-const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
+const SHOT_BLUEPRINTS = [
+  { roomType: "Exterior", prompt: "Slow cinematic push-in with a refined editorial feel." },
+  { roomType: "Living room", prompt: "Gentle left-to-right drift across the property details." },
+  { roomType: "Kitchen", prompt: "Measured upward reveal with soft natural movement." },
+  { roomType: "Dining room", prompt: "Subtle parallax move that keeps the architecture calm and clear." },
+  { roomType: "Primary bedroom", prompt: "Quiet forward reveal with a refined editorial feel." },
+  { roomType: "Bathroom", prompt: "Subtle floating move through the detail." },
+  { roomType: "Outdoor living", prompt: "Slow arc across the outdoor setting." },
+  { roomType: "View", prompt: "Steady reveal toward the horizon." },
+  { roomType: "Detail", prompt: "Delicate architectural drift across the material." },
+  { roomType: "Closing frame", prompt: "Unhurried pull-back to the hero composition." },
+] as const;
 
 export function getShotPlan(mediaUrls: string[]) {
   return mediaUrls.map((sourceUrl, index) => {
     const blueprint = SHOT_BLUEPRINTS[index % SHOT_BLUEPRINTS.length];
-    return {
-      index,
-      sourceUrl,
-      roomType: blueprint.roomType,
-      prompt: blueprint.prompt,
-    };
+    return { index, sourceUrl, roomType: blueprint.roomType, prompt: blueprint.prompt };
   });
 }
 
@@ -104,8 +94,8 @@ function fallbackSnapshot(projectStatus: string, mediaUrls: string[], finalVideo
     return {
       jobId: null,
       status: "Processing",
-      phase: "analysis",
-      currentStep: "Preparing your shot list…",
+      phase: "generation",
+      currentStep: "Ready to create your cinematic clips in this browser.",
       overallProgress: 0,
       completedShots: 0,
       totalShots: mediaUrls.length,
@@ -141,54 +131,12 @@ export function startRenderJob(userId: number, projectId: number, mediaUrls: str
     projectId,
     userId,
     status: "Processing",
-    phase: "analysis",
-    currentStep: "Analyzing each property photo…",
-    overallProgress: 3,
-    startedAt: Date.now(),
+    phase: "generation",
+    currentStep: "Your browser is ready to build the cinematic clips.",
+    overallProgress: 0,
     finalVideoUrl: null,
     shots: makeShots(mediaUrls),
   };
   jobs.set(projectId, job);
-  void runRenderJob(job);
   return snapshot(job);
-}
-
-async function runRenderJob(job: RenderJob) {
-  try {
-    for (let index = 0; index < job.shots.length; index += 1) {
-      const shot = job.shots[index];
-      shot.state = "analyzing";
-      job.phase = "analysis";
-      job.currentStep = `Reading shot ${index + 1} of ${job.shots.length}…`;
-      job.overallProgress = Math.min(24, 4 + Math.round(((index + 1) / job.shots.length) * 20));
-      await wait(260);
-      shot.state = "ready";
-    }
-
-    for (let index = 0; index < job.shots.length; index += 1) {
-      const shot = job.shots[index];
-      shot.state = "generating";
-      job.phase = "generation";
-      job.currentStep = `Generating clip ${index + 1} of ${job.shots.length}…`;
-      job.overallProgress = 25 + Math.round((index / job.shots.length) * 60);
-      await wait(420);
-      shot.state = "complete";
-      job.overallProgress = 25 + Math.round(((index + 1) / job.shots.length) * 60);
-    }
-
-    job.phase = "assembly";
-    job.currentStep = "Your AI generation is queued. Because this is a private pilot, your final video will be delivered manually.";
-    job.overallProgress = 92;
-    
-    // For the private pilot, we do NOT complete the job automatically.
-    // We leave it in the Processing/assembly state so the user knows it is being handled manually.
-    // The admin will download the photos, run the Python script, and deliver the MP4 directly.
-    await updateVideoProject(job.userId, job.projectId, {
-      status: "Processing",
-    });
-  } catch (error) {
-    job.status = "Failed";
-    job.phase = "failed";
-    job.currentStep = error instanceof Error ? error.message : "Render failed. Please try again.";
-  }
 }

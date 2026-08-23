@@ -10,30 +10,26 @@ import { appendUploadChunk, createUploadSession } from "./uploadSessions";
 
 const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
+function imageFiles(count: number) {
+  return Array.from({ length: count }).map((_, i) => ({ name: `${i}.png`, type: "image/png", base64: pixel }));
+}
+
 describe("property media validation", () => {
-  it("requires exactly ten images", () => {
-    expect(() =>
-      validatePropertyMedia([
-        { name: "one.png", type: "image/png", base64: pixel },
-        { name: "two.png", type: "image/png", base64: pixel },
-      ]),
-    ).toThrow("Upload exactly 10 property images.");
+  it("accepts one through ten property images", () => {
+    expect(validatePropertyMedia(imageFiles(1))).toMatchObject({ isVideo: false });
+    expect(validatePropertyMedia(imageFiles(10))).toMatchObject({ isVideo: false });
   });
 
-  it("accepts ten property images", () => {
-    expect(
-      validatePropertyMedia(
-        Array.from({ length: 10 }).map((_, i) => ({ name: `${i}.png`, type: "image/png", base64: pixel }))
-      ),
-    ).toMatchObject({ isVideo: false });
+  it("rejects more than ten property images", () => {
+    expect(() => validatePropertyMedia(imageFiles(11))).toThrow("Upload up to 10 property photos.");
   });
 
   it("rejects video uploads", () => {
     expect(() =>
       validatePropertyMedia(
-        Array.from({ length: 10 }).map((_, i) => ({ name: `${i}.mp4`, type: "video/mp4", base64: pixel }))
+        Array.from({ length: 2 }).map((_, i) => ({ name: `${i}.mp4`, type: "video/mp4", base64: pixel })),
       ),
-    ).toThrow("Upload exactly 10 property images. Walkthrough videos are no longer accepted.");
+    ).toThrow("Upload property images only");
   });
 
   it("preserves the required project status vocabulary and review transition", () => {

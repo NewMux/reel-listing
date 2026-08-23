@@ -1,8 +1,4 @@
-import {
-  MAX_PROPERTY_MEDIA_BYTES,
-  REQUIRED_PROPERTY_IMAGES,
-  projectStatuses,
-} from "../shared/video";
+import { MAX_PROPERTY_MEDIA_BYTES, MAX_PROPERTY_PHOTOS, projectStatuses } from "../shared/video";
 
 export const acceptedMediaTypes = [
   "image/jpeg",
@@ -33,14 +29,12 @@ export function decodeBase64Media(data: string): Buffer {
 
 export function validatePropertyMedia(files: UploadCandidate[]) {
   if (files.length === 0) throw new Error("Add property media to continue.");
-  if (files.length !== REQUIRED_PROPERTY_IMAGES) {
-    throw new Error(`Upload exactly ${REQUIRED_PROPERTY_IMAGES} property images.`);
+  if (files.length > MAX_PROPERTY_PHOTOS) {
+    throw new Error(`Upload up to ${MAX_PROPERTY_PHOTOS} property photos.`);
   }
 
   const hasVideo = files.some(file => file.type.startsWith("video/"));
-  if (hasVideo) {
-    throw new Error("Upload exactly 10 property images. Walkthrough videos are no longer accepted.");
-  }
+  if (hasVideo) throw new Error("Upload property images only. Video uploads are not supported.");
 
   let totalBytes = 0;
   for (const file of files) {
@@ -60,14 +54,12 @@ export function validatePropertyMedia(files: UploadCandidate[]) {
 
 export function validateUploadedPropertyMedia(files: UploadedMedia[]) {
   if (files.length === 0) throw new Error("Add property media to continue.");
-  if (files.length !== REQUIRED_PROPERTY_IMAGES) {
-    throw new Error(`Upload exactly ${REQUIRED_PROPERTY_IMAGES} property images.`);
+  if (files.length > MAX_PROPERTY_PHOTOS) {
+    throw new Error(`Upload up to ${MAX_PROPERTY_PHOTOS} property photos.`);
   }
 
   const hasVideo = files.some(file => file.type.startsWith("video/"));
-  if (hasVideo) {
-    throw new Error("Upload exactly 10 property images. Walkthrough videos are no longer accepted.");
-  }
+  if (hasVideo) throw new Error("Upload property images only. Video uploads are not supported.");
 
   for (const file of files) {
     if (!acceptedMediaTypes.includes(file.type as (typeof acceptedMediaTypes)[number])) {
