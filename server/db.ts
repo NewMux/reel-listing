@@ -1,5 +1,6 @@
+import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
 import { and, desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -8,7 +9,13 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      const client = postgres(process.env.DATABASE_URL, {
+        prepare: false,
+        max: 5,
+        idle_timeout: 20,
+        connect_timeout: 10,
+      });
+      _db = drizzle(client);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -22,18 +29,23 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   const db = await getDb();
   if (!db) return;
 
-  const values: InsertUser = { openId: user.openId, lastSignedIn: new Date() };
-  const updateSet: Record<string, unknown> = { lastSignedIn: new Date() };
+  const values: InsertUser = {
+    openId: user.openId,
+    lastSignedIn: new Date(),
+    role: user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : "user"),
+  };
+  const updateSet: Partial<InsertUser> = { lastSignedIn: new Date(), role: values.role };
   for (const field of ["name", "email", "loginMethod"] as const) {
     if (user[field] !== undefined) {
       values[field] = user[field] ?? null;
       updateSet[field] = user[field] ?? null;
     }
   }
-  values.role = user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : "user");
-  updateSet.role = values.role;
 
-  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+  await db.insert(users).values(values).onConflictDoUpdate({
+    target: users.openId,
+    set: updateSet,
+  });
 }
 
 export async function getUserByOpenId(openId: string) {
@@ -63,8 +75,8 @@ export async function getVideoProject(userId: number, projectId: number) {
 export async function createVideoProject(project: InsertVideoProject) {
   const db = await getDb();
   if (!db) throw new Error("Project storage is temporarily unavailable.");
-  const result = await db.insert(videoProjects).values(project);
-  return Number(result[0].insertId);
+  const result = await db.insert(videoProjects).values(project).returning({ id: videoProjects.id });
+  return result[0].id;
 }
 
 export async function updateVideoProject(
@@ -76,7 +88,7 @@ export async function updateVideoProject(
   if (!db) throw new Error("Project storage is temporarily unavailable.");
   await db
     .update(videoProjects)
-    .set(updates)
+    .set({ ...updates, updatedAt: new Date() })
     .where(and(eq(videoProjects.userId, userId), eq(videoProjects.id, projectId)));
   return getVideoProject(userId, projectId);
 }

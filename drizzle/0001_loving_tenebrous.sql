@@ -1,19 +1,26 @@
-CREATE TABLE `video_projects` (
-	`id` int AUTO_INCREMENT NOT NULL,
-	`userId` int NOT NULL,
-	`title` varchar(160) NOT NULL,
-	`description` text,
-	`location` varchar(180) NOT NULL,
-	`mediaUrls` json NOT NULL,
-	`mediaKeys` json NOT NULL,
-	`mediaNames` json NOT NULL,
-	`mediaTypes` json NOT NULL,
-	`status` enum('Uploading','Processing','Review','Done') NOT NULL DEFAULT 'Review',
-	`revisionNotes` text,
-	`finalVideoUrl` text,
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
-	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
-	CONSTRAINT `video_projects_id` PRIMARY KEY(`id`)
+CREATE TYPE "project_status" AS ENUM ('Uploading', 'Processing', 'Review', 'Done');
+CREATE TYPE "render_phase" AS ENUM ('idle', 'generating', 'assembly', 'complete', 'failed');
+
+CREATE TABLE "video_projects" (
+  "id" serial PRIMARY KEY,
+  "userId" integer NOT NULL,
+  "title" varchar(160) NOT NULL,
+  "description" text,
+  "location" varchar(180) NOT NULL,
+  "mediaUrls" jsonb NOT NULL,
+  "mediaKeys" jsonb NOT NULL,
+  "mediaNames" jsonb NOT NULL,
+  "mediaTypes" jsonb NOT NULL,
+  "status" "project_status" NOT NULL DEFAULT 'Review',
+  "revisionNotes" text,
+  "finalVideoUrl" text,
+  "falRequestIds" jsonb DEFAULT '[]'::jsonb,
+  "clipUrls" jsonb DEFAULT '[]'::jsonb,
+  "renderProgress" integer NOT NULL DEFAULT 0,
+  "renderPhase" "render_phase" NOT NULL DEFAULT 'idle',
+  "renderError" text,
+  "createdAt" timestamptz NOT NULL DEFAULT now(),
+  "updatedAt" timestamptz NOT NULL DEFAULT now()
 );
---> statement-breakpoint
-CREATE INDEX `video_projects_user_idx` ON `video_projects` (`userId`);
+
+CREATE INDEX "video_projects_user_idx" ON "video_projects" ("userId");
