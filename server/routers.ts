@@ -12,7 +12,7 @@ import {
   getCompletionTransition,
   validateUploadedPropertyMedia,
 } from "./projects";
-import { storageCreatePutTarget } from "./storage";
+import { signStoredUrl, storageCreatePutTarget, storageGetSignedUrl } from "./storage";
 import { appendUploadChunk, createUploadSession, finalizeUploadSession } from "./uploadSessions";
 import { getProjectRenderStatus } from "./renderPipeline";
 import { refreshFalRender, submitFalRender } from "./falPipeline";
@@ -30,6 +30,26 @@ function projectIdInput(id: number) {
   }
 }
 
+async function presentProject(project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null) {
+  if (!project) return project;
+  const mediaUrls = accessToken
+    ? await Promise.all(project.mediaKeys.map(key => storageGetSignedUrl(key, accessToken)))
+    : project.mediaUrls;
+  return { ...project, mediaUrls, finalVideoUrl: await signStoredUrl(project.finalVideoUrl, accessToken) };
+}
+
+async function presentRender(snapshot: Awaited<ReturnType<typeof getProjectRenderStatus>>, project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null) {
+  if (!project) return snapshot;
+  const sourceUrls = accessToken
+    ? await Promise.all(project.mediaKeys.map(key => storageGetSignedUrl(key, accessToken)))
+    : project.mediaUrls;
+  return {
+    ...snapshot,
+    finalVideoUrl: await signStoredUrl(snapshot.finalVideoUrl, accessToken),
+    shots: snapshot.shots.map((shot, index) => ({ ...shot, sourceUrl: sourceUrls[index] || shot.sourceUrl })),
+  };
+}
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -41,12 +61,12 @@ export const appRouter = router({
     }),
   }),
   projects: router({
-    list: protectedProcedure.query(({ ctx }) => listVideoProjects(ctx.user.id)),
+    list: protectedProcedure.query(async ({ ctx }) => Promise.all((await listVideoProjects(ctx.user.id)).map(project => presentProject(project, ctx.supabaseAccessToken)))),
     get: protectedProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ ctx, input }) => {
       projectIdInput(input.id);
       const project = await getVideoProject(ctx.user.id, input.id);
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
-      return project;
+      return presentProject(project, ctx.supabaseAccessToken);
     }),
     create: protectedProcedure
       .input(
@@ -88,9 +108,10 @@ export const appRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
       try {
         const transition = getApprovalTransition(project.status);
-        const render = await submitFalRender(ctx.user.id, project);
+        const render = await submitFalRender(ctx.user.id, project, ctx.supabaseAccessToken);
         const updated = await updateVideoProject(ctx.user.id, input.id, transition);
-        return { project: updated, render };
+        if (!updated) throw new Error("The project could not be updated after rendering started.");
+        return { project: await presentProject(updated, ctx.supabaseAccessToken), render: await presentRender(render, project, ctx.supabaseAccessToken) };
       } catch (error) {
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to start fal.ai rendering." });
       }
@@ -115,12 +136,12 @@ export const appRouter = router({
         if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
         if (project.status === "Processing" && project.falRequestIds?.length) {
           try {
-            return await refreshFalRender(ctx.user.id, project);
+            return await presentRender(await refreshFalRender(ctx.user.id, project, ctx.supabaseAccessToken), project, ctx.supabaseAccessToken);
           } catch (error) {
             throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to refresh fal.ai rendering." });
           }
         }
-        return getProjectRenderStatus(project);
+        return presentRender(getProjectRenderStatus(project), project, ctx.supabaseAccessToken);
       }),
     complete: protectedProcedure
       .input(z.object({ id: z.number().int().positive(), finalVideoUrl: z.string().min(1).max(2_000) }))
@@ -146,7 +167,7 @@ export const appRouter = router({
       .input(z.object({ name: z.string().trim().min(1).max(240), type: z.string().min(1).max(100), totalBytes: z.number().int().positive().max(MAX_PROPERTY_MEDIA_BYTES) }))
       .mutation(({ ctx, input }) => {
         try {
-          return createUploadSession(ctx.user.id, input.name, input.type, input.totalBytes);
+          return createUploadSession(ctx.user.id, input.name, input.type, input.totalBytes, ctx.supabaseAccessToken);
         } catch (error) {
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to prepare upload." });
         }
@@ -177,7 +198,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: "Use JPG, PNG, WEBP, WEBM, or MP4 media files." });
         }
         const safeName = input.name.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/-+/g, "-");
-        return storageCreatePutTarget(`property-projects/${ctx.user.id}/outputs/${Date.now()}-${safeName}`);
+        return storageCreatePutTarget(`property-projects/${ctx.user.id}/outputs/${Date.now()}-${safeName}`, ctx.supabaseAccessToken ?? undefined);
       }),
   }),
 });

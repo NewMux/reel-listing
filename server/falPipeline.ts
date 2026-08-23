@@ -100,9 +100,9 @@ async function submitVideoJobs(client: typeof fal, signedImages: string[], promp
   return responses.map(response => response.request_id);
 }
 
-export async function submitFalRender(userId: number, project: VideoProject) {
+export async function submitFalRender(userId: number, project: VideoProject, accessToken?: string | null) {
   const client = getFalClient();
-  const signedImages = await Promise.all(project.mediaKeys.map(key => storageGetSignedUrl(key)));
+  const signedImages = await Promise.all(project.mediaKeys.map(key => storageGetSignedUrl(key, accessToken ?? undefined)));
   const promptRequestIds = await submitVisionPromptJobs(client, signedImages, project);
   const emptyPrompts = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
   const emptyClips = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
@@ -130,11 +130,11 @@ export async function submitFalRender(userId: number, project: VideoProject) {
   });
 }
 
-export async function refreshFalRender(userId: number, project: VideoProject): Promise<RenderStatusSnapshot> {
+export async function refreshFalRender(userId: number, project: VideoProject, accessToken?: string | null): Promise<RenderStatusSnapshot> {
   const promptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
   const generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
   const signedImages = project.mediaKeys.length === project.mediaUrls.length
-    ? await Promise.all(project.mediaKeys.map(key => storageGetSignedUrl(key)))
+    ? await Promise.all(project.mediaKeys.map(key => storageGetSignedUrl(key, accessToken ?? undefined)))
     : [];
   const client = getFalClient();
   let failedMessage: string | null = null;

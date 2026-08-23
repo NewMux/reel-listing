@@ -8,6 +8,7 @@ export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
   res: CreateExpressContextOptions["res"];
   user: User | null;
+  supabaseAccessToken: string | null;
 };
 
 type SupabaseUser = {
@@ -21,9 +22,9 @@ function bearerToken(req: CreateExpressContextOptions["req"]) {
   return authorization?.startsWith("Bearer ") ? authorization.slice(7).trim() : null;
 }
 
-async function authenticateSupabaseRequest(req: CreateExpressContextOptions["req"]): Promise<User | null> {
+async function authenticateSupabaseRequest(req: CreateExpressContextOptions["req"]): Promise<{ user: User | null; accessToken: string | null }> {
   const token = bearerToken(req);
-  if (!token || !ENV.supabaseUrl || !ENV.supabaseAnonKey) return null;
+  if (!token || !ENV.supabaseUrl || !ENV.supabaseAnonKey) return { user: null, accessToken: null };
 
   try {
     const response = await fetch(`${ENV.supabaseUrl.replace(/\/$/, "")}/auth/v1/user`, {
@@ -32,10 +33,10 @@ async function authenticateSupabaseRequest(req: CreateExpressContextOptions["req
         authorization: `Bearer ${token}`,
       },
     });
-    if (!response.ok) return null;
+    if (!response.ok) return { user: null, accessToken: null };
 
     const supabaseUser = await response.json() as SupabaseUser;
-    if (!supabaseUser.id) return null;
+    if (!supabaseUser.id) return { user: null, accessToken: null };
 
     const metadata = supabaseUser.user_metadata ?? {};
     const metadataName = metadata.full_name ?? metadata.name;
@@ -47,16 +48,18 @@ async function authenticateSupabaseRequest(req: CreateExpressContextOptions["req
       email: supabaseUser.email ?? null,
       loginMethod: "supabase",
     });
-    return (await getUserByOpenId(openId)) ?? null;
+    return { user: (await getUserByOpenId(openId)) ?? null, accessToken: token };
   } catch {
-    return null;
+    return { user: null, accessToken: null };
   }
 }
 
 export async function createContext(
   opts: CreateExpressContextOptions,
 ): Promise<TrpcContext> {
-  let user: User | null = await authenticateSupabaseRequest(opts.req);
+  const supabaseAuth = await authenticateSupabaseRequest(opts.req);
+  let user: User | null = supabaseAuth.user;
+  const supabaseAccessToken = supabaseAuth.accessToken;
 
   if (!user && ENV.oAuthServerUrl) {
     try {
@@ -71,5 +74,6 @@ export async function createContext(
     req: opts.req,
     res: opts.res,
     user,
+    supabaseAccessToken,
   };
 }

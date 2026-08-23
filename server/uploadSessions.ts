@@ -13,6 +13,7 @@ type UploadSession = {
   receivedBytes: number;
   chunks: Buffer[];
   createdAt: number;
+  accessToken: string | null;
 };
 
 const sessions = new Map<string, UploadSession>();
@@ -34,7 +35,7 @@ function getOwnedSession(userId: number, uploadId: string) {
   return session;
 }
 
-export function createUploadSession(userId: number, name: string, type: string, totalBytes: number) {
+export function createUploadSession(userId: number, name: string, type: string, totalBytes: number, accessToken?: string | null) {
   cleanExpiredSessions();
   if (!["image/jpeg", "image/png", "image/webp"].includes(type)) {
     throw new Error("Use JPG, PNG, or WEBP image files.");
@@ -43,7 +44,7 @@ export function createUploadSession(userId: number, name: string, type: string, 
     throw new Error("Keep the combined upload size under 25 MB.");
   }
   const id = crypto.randomUUID();
-  sessions.set(id, { userId, name, type, totalBytes, receivedBytes: 0, chunks: [], createdAt: Date.now() });
+  sessions.set(id, { userId, name, type, totalBytes, receivedBytes: 0, chunks: [], createdAt: Date.now(), accessToken: accessToken ?? null });
   return { id, chunkSize: UPLOAD_CHUNK_BYTES };
 }
 
@@ -72,6 +73,7 @@ export async function finalizeUploadSession(userId: number, uploadId: string) {
     `property-projects/${userId}/${Date.now()}-${safeFileName(session.name)}`,
     Buffer.concat(session.chunks, session.totalBytes),
     session.type,
+    session.accessToken ?? undefined,
   );
   return { name: session.name, type: session.type, key: asset.key, url: asset.url };
 }
