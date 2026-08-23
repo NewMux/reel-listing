@@ -1,6 +1,5 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useEffect } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -13,17 +12,10 @@ import NotFound from "./pages/NotFound";
 import Pricing from "./pages/Pricing";
 import ProjectDetail from "./pages/ProjectDetail";
 import ProjectReview from "./pages/ProjectReview";
-import { startLogin } from "./const";
-
-function LoginRedirect() {
-  useEffect(() => {
-    startLogin();
-  }, []);
-  return <div className="grid min-h-screen place-items-center bg-[#F7F5EF] text-sm text-[#65746B]">Redirecting to sign in…</div>;
-}
+import Auth from "./pages/Auth";
 
 function Router() {
-  return <Switch><Route path="/" component={Home}/><Route path="/pricing" component={Pricing}/><Route path="/terms">{() => <Legal type="terms"/>}</Route><Route path="/privacy">{() => <Legal type="privacy"/>}</Route><Route path="/pilot" component={LoginRedirect}/><Route path="/dashboard" component={Dashboard}/><Route path="/projects/new" component={NewProject}/><Route path="/projects/:id/review" component={ProjectReview}/><Route path="/projects/:id" component={ProjectDetail}/><Route component={NotFound}/></Switch>;
+  return <Switch><Route path="/" component={Home}/><Route path="/pricing" component={Pricing}/><Route path="/terms">{() => <Legal type="terms"/>}</Route><Route path="/privacy">{() => <Legal type="privacy"/>}</Route><Route path="/auth" component={Auth}/><Route path="/pilot" component={Auth}/><Route path="/dashboard" component={Dashboard}/><Route path="/projects/new" component={NewProject}/><Route path="/projects/:id/review" component={ProjectReview}/><Route path="/projects/:id" component={ProjectDetail}/><Route component={NotFound}/></Switch>;
 }
 
 export default function App() {
