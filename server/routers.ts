@@ -134,7 +134,7 @@ export const appRouter = router({
         projectIdInput(input.id);
         const project = await getVideoProject(ctx.user.id, input.id);
         if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
-        if (project.status === "Processing" && project.falRequestIds?.length) {
+        if (project.status === "Processing" && (project.promptRequestIds?.length || project.falRequestIds?.length)) {
           try {
             return await presentRender(await refreshFalRender(ctx.user.id, project, ctx.supabaseAccessToken), project, ctx.supabaseAccessToken);
           } catch (error) {
