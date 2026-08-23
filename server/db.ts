@@ -70,7 +70,7 @@ export async function createVideoProject(project: InsertVideoProject) {
 export async function updateVideoProject(
   userId: number,
   projectId: number,
-  updates: Partial<Pick<InsertVideoProject, "status" | "revisionNotes" | "finalVideoUrl">>,
+  updates: Partial<Pick<InsertVideoProject, "status" | "revisionNotes" | "finalVideoUrl" | "falRequestIds" | "clipUrls" | "renderProgress" | "renderPhase" | "renderError">>,
 ) {
   const db = await getDb();
   if (!db) throw new Error("Project storage is temporarily unavailable.");

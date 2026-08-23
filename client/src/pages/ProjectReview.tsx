@@ -46,7 +46,7 @@ export default function ProjectReview() {
   const names = shotNames[locale];
   const prompts = shotPrompts[locale];
   const clipCount = data.mediaUrls.length;
-  const duration = clipCount * 10;
+  const duration = clipCount * 5;
 
   return (
     <AppSidebar>
@@ -61,7 +61,7 @@ export default function ProjectReview() {
 
             <div className="mt-8 rounded-[22px] bg-[#EAF0DC] p-5">
               <div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-[#D8E9B2] text-[#436515]"><Sparkles size={17} /></span><div><p className="text-sm font-bold text-[#284633]">{data.title}</p><p className="mt-0.5 text-xs text-[#6A7B6E]">{data.location}</p></div></div>
-              <div className="mt-5 grid grid-cols-3 gap-2 border-t border-[#BFD19C] pt-4"><div><p className="text-lg font-bold tracking-[-.04em] text-[#35531F]">{clipCount}</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#70805F]">{locale === "en" ? "clips" : "مقاطع"}</p></div><div><p className="text-lg font-bold tracking-[-.04em] text-[#35531F]">10s</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#70805F]">{locale === "en" ? "each" : "لكل منها"}</p></div><div><p className="text-lg font-bold tracking-[-.04em] text-[#35531F]">~{duration}s</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#70805F]">{locale === "en" ? "final reel" : "الفيلم النهائي"}</p></div></div>
+              <div className="mt-5 grid grid-cols-3 gap-2 border-t border-[#BFD19C] pt-4"><div><p className="text-lg font-bold tracking-[-.04em] text-[#35531F]">{clipCount}</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#70805F]">{locale === "en" ? "clips" : "مقاطع"}</p></div><div><p className="text-lg font-bold tracking-[-.04em] text-[#35531F]">5s</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#70805F]">{locale === "en" ? "each" : "لكل منها"}</p></div><div><p className="text-lg font-bold tracking-[-.04em] text-[#35531F]">~{duration}s</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#70805F]">{locale === "en" ? "final reel" : "الفيلم النهائي"}</p></div></div>
             </div>
 
             <div className="mt-5 flex items-start gap-3 rounded-2xl border border-[#11251E]/8 bg-white/70 p-4 text-sm leading-6 text-[#65756B]"><Clock3 size={17} className="mt-0.5 shrink-0 text-[#6E8249]" />{locale === "en" ? "Your photos stay in this order. Approve once and reel-listing.com creates the cinematic segments and stitches them into one final reel." : "ستبقى صورك بهذا الترتيب. وافق مرة واحدة وسيُنشئ reel-listing.com المقاطع السينمائية ويجمعها في فيلم نهائي واحد."}</div>
@@ -79,7 +79,7 @@ export default function ProjectReview() {
               ))}
             </div>
 
-            <div className="mt-7 rounded-2xl border border-[#11251E]/8 bg-[#F8F8F3] p-4"><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.1em] text-[#6E8249]"><Sparkles size={14} />{t.review.storyboard}</div><div className="mt-3 grid gap-2 sm:grid-cols-2">{data.mediaUrls.map((_, index) => <div key={index} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2.5"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#D8E9B2] text-[10px] font-bold text-[#4A6B2A]">{index + 1}</span><span className="text-xs font-semibold text-[#446052]">{prompts[index] || prompts[index % prompts.length]}</span><span className="ms-auto text-[10px] font-bold text-[#929C93]">10s</span></div>)}</div></div>
+            <div className="mt-7 rounded-2xl border border-[#11251E]/8 bg-[#F8F8F3] p-4"><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.1em] text-[#6E8249]"><Sparkles size={14} />{t.review.storyboard}</div><div className="mt-3 grid gap-2 sm:grid-cols-2">{data.mediaUrls.map((_, index) => <div key={index} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2.5"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#D8E9B2] text-[10px] font-bold text-[#4A6B2A]">{index + 1}</span><span className="text-xs font-semibold text-[#446052]">{prompts[index] || prompts[index % prompts.length]}</span><span className="ms-auto text-[10px] font-bold text-[#929C93]">5s</span></div>)}</div></div>
 
             {data.revisionNotes && <div className="mt-5 rounded-xl bg-[#F7F1E7] p-3.5"><p className="text-[11px] font-bold uppercase tracking-[.1em] text-[#886534]">{t.review.changeSent}</p><p className="mt-1 text-sm leading-6 text-[#695C47]">{data.revisionNotes}</p></div>}
 

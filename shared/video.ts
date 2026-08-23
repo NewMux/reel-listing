@@ -1,4 +1,8 @@
 export const projectStatuses = ["Uploading", "Processing", "Review", "Done"] as const;
+export const renderPhases = ["idle", "generating", "assembly", "complete", "failed"] as const;
+export type RenderPhase = (typeof renderPhases)[number];
+export const FAL_IMAGE_TO_VIDEO_MODEL = "fal-ai/kling-video/v2.5-turbo/pro/image-to-video";
+export const FAL_CLIP_SECONDS = 5;
 
 export type ProjectStatus = (typeof projectStatuses)[number];
 

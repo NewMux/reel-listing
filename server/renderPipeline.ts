@@ -1,8 +1,12 @@
-export const CINEMATIC_CLIP_SECONDS = 10;
+import type { VideoProject } from "../drizzle/schema";
+import { FAL_CLIP_SECONDS } from "../shared/video";
+
+export { FAL_CLIP_SECONDS };
+export const CINEMATIC_CLIP_SECONDS = FAL_CLIP_SECONDS;
 
 type ShotState = "queued" | "rendering" | "complete";
 
-type Shot = {
+export type Shot = {
   index: number;
   sourceUrl: string;
   roomType: string;
@@ -11,31 +15,19 @@ type Shot = {
   clipUrl: string | null;
 };
 
-type RenderJob = {
-  jobId: string;
-  projectId: number;
-  userId: number;
-  status: "Processing" | "Done" | "Failed";
-  phase: "generation" | "assembly" | "complete" | "failed";
-  currentStep: string;
-  overallProgress: number;
-  finalVideoUrl: string | null;
-  shots: Shot[];
-};
-
 export type RenderStatusSnapshot = {
   jobId: string | null;
-  status: "Review" | "Processing" | "Done" | "Failed";
-  phase: RenderJob["phase"] | "review";
+  status: "Review" | "Processing" | "Done";
+  phase: "review" | "generating" | "assembly" | "complete" | "failed";
   currentStep: string;
   overallProgress: number;
   completedShots: number;
   totalShots: number;
   finalVideoUrl: string | null;
+  clipUrls: (string | null)[];
   shots: Shot[];
+  error: string | null;
 };
-
-const jobs = new Map<number, RenderJob>();
 
 const SHOT_BLUEPRINTS = [
   { roomType: "Exterior", prompt: "Slow cinematic push-in with a refined editorial feel." },
@@ -57,86 +49,94 @@ export function getShotPlan(mediaUrls: string[]) {
   });
 }
 
-function makeShots(mediaUrls: string[], state: ShotState = "queued"): Shot[] {
-  return getShotPlan(mediaUrls).map(shot => ({ ...shot, state, clipUrl: null }));
+function makeShots(
+  mediaUrls: string[],
+  clipUrls: (string | null)[],
+  requestIds: (string | null)[],
+  phase: RenderStatusSnapshot["phase"],
+): Shot[] {
+  return getShotPlan(mediaUrls).map(shot => ({
+    ...shot,
+    state: clipUrls[shot.index] || phase === "complete" ? "complete" : phase === "generating" && requestIds[shot.index] ? "rendering" : "queued",
+    clipUrl: clipUrls[shot.index] || null,
+  }));
 }
 
-function snapshot(job: RenderJob): RenderStatusSnapshot {
-  return {
-    jobId: job.jobId,
-    status: job.status,
-    phase: job.phase,
-    currentStep: job.currentStep,
-    overallProgress: job.overallProgress,
-    completedShots: job.shots.filter(shot => shot.state === "complete").length,
-    totalShots: job.shots.length,
-    finalVideoUrl: job.finalVideoUrl,
-    shots: job.shots,
-  };
-}
+export function buildRenderSnapshot(input: {
+  projectId: number;
+  status: string;
+  mediaUrls: string[];
+  finalVideoUrl?: string | null;
+  falRequestIds?: (string | null)[] | null;
+  clipUrls?: (string | null)[] | null;
+  renderProgress?: number | null;
+  renderPhase?: RenderStatusSnapshot["phase"] | "idle" | null;
+  renderError?: string | null;
+}): RenderStatusSnapshot {
+  const requestIds = input.falRequestIds || [];
+  const clipUrls = input.clipUrls || [];
+  const totalShots = input.mediaUrls.length;
+  const normalizedStatus = input.status === "Done" ? "Done" : input.status === "Processing" ? "Processing" : "Review";
+  const completedShots = normalizedStatus === "Done" ? totalShots : clipUrls.filter(Boolean).length;
+  const phase = normalizedStatus === "Done"
+    ? "complete"
+    : normalizedStatus === "Review"
+      ? "review"
+      : input.renderPhase === "failed"
+        ? "failed"
+        : input.renderPhase === "assembly" || completedShots === totalShots
+          ? "assembly"
+          : "generating";
 
-function fallbackSnapshot(projectStatus: string, mediaUrls: string[], finalVideoUrl: string | null): RenderStatusSnapshot {
-  if (projectStatus === "Done") {
-    return {
-      jobId: null,
-      status: "Done",
-      phase: "complete",
-      currentStep: "Your reel is ready to share.",
-      overallProgress: 100,
-      completedShots: mediaUrls.length,
-      totalShots: mediaUrls.length,
-      finalVideoUrl,
-      shots: makeShots(mediaUrls, "complete"),
-    };
-  }
-
-  if (projectStatus === "Processing") {
-    return {
-      jobId: null,
-      status: "Processing",
-      phase: "generation",
-      currentStep: "Ready to create your cinematic clips in this browser.",
-      overallProgress: 0,
-      completedShots: 0,
-      totalShots: mediaUrls.length,
-      finalVideoUrl: null,
-      shots: makeShots(mediaUrls),
-    };
-  }
+  const currentStep = phase === "review"
+    ? "Awaiting your approval."
+    : phase === "failed"
+      ? input.renderError || "The cinematic render needs another try."
+      : phase === "assembly"
+        ? "All clips are ready for final assembly."
+        : completedShots > 0
+          ? `Generating cinematic clip ${Math.min(completedShots + 1, totalShots)} of ${totalShots}…`
+          : "Submitting your property photos to the cinematic renderer…";
 
   return {
     jobId: null,
-    status: projectStatus === "Review" ? "Review" : "Failed",
-    phase: "review",
-    currentStep: "Awaiting your approval.",
-    overallProgress: 0,
-    completedShots: 0,
-    totalShots: mediaUrls.length,
-    finalVideoUrl: null,
-    shots: makeShots(mediaUrls),
+    status: normalizedStatus,
+    phase,
+    currentStep,
+    overallProgress: normalizedStatus === "Done" ? 100 : Math.max(0, Math.min(100, input.renderProgress || 0)),
+    completedShots,
+    totalShots,
+    finalVideoUrl: input.finalVideoUrl || null,
+    clipUrls,
+    shots: makeShots(input.mediaUrls, clipUrls, requestIds, phase),
+    error: input.renderError || null,
   };
 }
 
-export function getRenderStatus(projectId: number, projectStatus: string, mediaUrls: string[], finalVideoUrl: string | null) {
-  const job = jobs.get(projectId);
-  return job ? snapshot(job) : fallbackSnapshot(projectStatus, mediaUrls, finalVideoUrl);
+export function getRenderStatus(
+  projectId: number,
+  projectStatus: string,
+  mediaUrls: string[],
+  finalVideoUrl: string | null,
+  clipUrls: (string | null)[] = [],
+  requestIds: (string | null)[] = [],
+  renderProgress = projectStatus === "Done" ? 100 : 0,
+  renderPhase: RenderStatusSnapshot["phase"] | "idle" = "idle",
+  renderError: string | null = null,
+) {
+  return buildRenderSnapshot({ projectId, status: projectStatus, mediaUrls, finalVideoUrl, clipUrls, falRequestIds: requestIds, renderProgress, renderPhase, renderError });
 }
 
-export function startRenderJob(userId: number, projectId: number, mediaUrls: string[]) {
-  const existing = jobs.get(projectId);
-  if (existing && existing.status === "Processing") return snapshot(existing);
-
-  const job: RenderJob = {
-    jobId: crypto.randomUUID(),
-    projectId,
-    userId,
-    status: "Processing",
-    phase: "generation",
-    currentStep: "Your browser is ready to build the cinematic clips.",
-    overallProgress: 0,
-    finalVideoUrl: null,
-    shots: makeShots(mediaUrls),
-  };
-  jobs.set(projectId, job);
-  return snapshot(job);
+export function getProjectRenderStatus(project: VideoProject) {
+  return buildRenderSnapshot({
+    projectId: project.id,
+    status: project.status,
+    mediaUrls: project.mediaUrls,
+    finalVideoUrl: project.finalVideoUrl,
+    falRequestIds: project.falRequestIds,
+    clipUrls: project.clipUrls,
+    renderProgress: project.renderProgress,
+    renderPhase: project.renderPhase,
+    renderError: project.renderError,
+  });
 }

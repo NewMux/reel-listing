@@ -14,7 +14,8 @@ import {
 } from "./projects";
 import { storageCreatePutTarget } from "./storage";
 import { appendUploadChunk, createUploadSession, finalizeUploadSession } from "./uploadSessions";
-import { getRenderStatus, startRenderJob } from "./renderPipeline";
+import { getProjectRenderStatus } from "./renderPipeline";
+import { refreshFalRender, submitFalRender } from "./falPipeline";
 
 const fileSchema = z.object({
   name: z.string().min(1).max(240),
@@ -86,11 +87,12 @@ export const appRouter = router({
       const project = await getVideoProject(ctx.user.id, input.id);
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
       try {
-        const updated = await updateVideoProject(ctx.user.id, input.id, getApprovalTransition(project.status));
-        const render = startRenderJob(ctx.user.id, input.id, project.mediaUrls);
+        const transition = getApprovalTransition(project.status);
+        const render = await submitFalRender(ctx.user.id, project);
+        const updated = await updateVideoProject(ctx.user.id, input.id, transition);
         return { project: updated, render };
       } catch (error) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to approve this project." });
+        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to start fal.ai rendering." });
       }
     }),
     requestChanges: protectedProcedure
@@ -111,7 +113,14 @@ export const appRouter = router({
         projectIdInput(input.id);
         const project = await getVideoProject(ctx.user.id, input.id);
         if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
-        return getRenderStatus(input.id, project.status, project.mediaUrls, project.finalVideoUrl);
+        if (project.status === "Processing" && project.falRequestIds?.length) {
+          try {
+            return await refreshFalRender(ctx.user.id, project);
+          } catch (error) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to refresh fal.ai rendering." });
+          }
+        }
+        return getProjectRenderStatus(project);
       }),
     complete: protectedProcedure
       .input(z.object({ id: z.number().int().positive(), finalVideoUrl: z.string().min(1).max(2_000) }))
@@ -120,7 +129,13 @@ export const appRouter = router({
         const project = await getVideoProject(ctx.user.id, input.id);
         if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
         try {
-          return updateVideoProject(ctx.user.id, input.id, getCompletionTransition(input.finalVideoUrl));
+          if (!input.finalVideoUrl.startsWith(`/manus-storage/property-projects/${ctx.user.id}/outputs/`)) {
+            throw new Error("Final delivery must belong to this project account.");
+          }
+          if (project.status !== "Processing" || !project.clipUrls?.length || project.clipUrls.some(url => !url)) {
+            throw new Error("All cinematic clips must be ready before final delivery.");
+          }
+          return updateVideoProject(ctx.user.id, input.id, { ...getCompletionTransition(input.finalVideoUrl), renderProgress: 100, renderPhase: "complete", renderError: null });
         } catch (error) {
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to complete this project." });
         }
