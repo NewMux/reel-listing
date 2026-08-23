@@ -49,14 +49,37 @@ export async function stitchClips(
   const concatFile = files.map(filename => `file '${filename}'`).join("\n");
   await engine.writeFile("clips.txt", new TextEncoder().encode(`${concatFile}\n`));
   onProgress({ progress: 28, currentStep: "Stitching the cinematic clips in upload order…" });
-  await engine.exec([
-    "-f", "concat",
-    "-safe", "0",
-    "-i", "clips.txt",
-    "-c", "copy",
-    "-movflags", "+faststart",
-    "final-reel.mp4",
-  ]);
+  try {
+    await engine.exec([
+      "-f", "concat",
+      "-safe", "0",
+      "-i", "clips.txt",
+      "-vf", "scale=-2:720",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "27",
+      "-maxrate", "4M",
+      "-bufsize", "8M",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-b:a", "96k",
+      "-movflags", "+faststart",
+      "final-reel.mp4",
+    ]);
+  } catch {
+    await engine.exec([
+      "-f", "concat",
+      "-safe", "0",
+      "-i", "clips.txt",
+      "-vf", "scale=-2:720",
+      "-c:v", "mpeg4",
+      "-q:v", "6",
+      "-c:a", "aac",
+      "-b:a", "96k",
+      "-movflags", "+faststart",
+      "final-reel.mp4",
+    ]);
+  }
 
   onProgress({ progress: 96, currentStep: "Preparing your final reel for download…" });
   const output = await engine.readFile("final-reel.mp4");
