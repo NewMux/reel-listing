@@ -32,6 +32,8 @@ export const videoProjects = pgTable(
     status: projectStatus("status").default("Review").notNull(),
     revisionNotes: text("revisionNotes"),
     finalVideoUrl: text("finalVideoUrl"),
+    promptRequestIds: jsonb("promptRequestIds").$type<(string | null)[]>().default([]),
+    generatedPrompts: jsonb("generatedPrompts").$type<(string | null)[]>().default([]),
     falRequestIds: jsonb("falRequestIds").$type<(string | null)[]>().default([]),
     clipUrls: jsonb("clipUrls").$type<(string | null)[]>().default([]),
     renderProgress: integer("renderProgress").default(0).notNull(),

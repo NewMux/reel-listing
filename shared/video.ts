@@ -2,6 +2,8 @@ export const projectStatuses = ["Uploading", "Processing", "Review", "Done"] as 
 export const renderPhases = ["idle", "generating", "assembly", "complete", "failed"] as const;
 export type RenderPhase = (typeof renderPhases)[number];
 export const FAL_IMAGE_TO_VIDEO_MODEL = "fal-ai/kling-video/v2.5-turbo/pro/image-to-video";
+export const FAL_VISION_PROMPT_MODEL = "openrouter/router/vision";
+export const FAL_VISION_LLM_MODEL = "google/gemini-2.5-flash";
 export const FAL_CLIP_SECONDS = 5;
 
 export type ProjectStatus = (typeof projectStatuses)[number];

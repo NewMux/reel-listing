@@ -10,6 +10,11 @@ describe("render pipeline", () => {
     expect(shots.map(shot => shot.index)).toEqual(Array.from({ length: 10 }, (_, index) => index));
   });
 
+  it("uses generated AI direction when it is available for a photo", () => {
+    const shots = getShotPlan(["/manus-storage/one.jpg"], ["AI-generated slow dolly across the sunlit living room."]);
+    expect(shots[0]?.prompt).toBe("AI-generated slow dolly across the sunlit living room.");
+  });
+
   it("reports a completed project as a fully assembled reel", () => {
     const status = getRenderStatus(
       1,
