@@ -67,6 +67,7 @@ function buildCinematicPrompt(index: number, direction: { shotType: string; came
     `Light behavior: ${direction.lighting}.`,
     `Visual focus: ${direction.focus}.`,
     `This is shot ${index + 1} in a five-second property sequence for ${propertyContext(project)}.`,
+    "Generate a premium architectural image-to-video shot with Kling 3 Pro. Favor filmic movement, clear shot intention, realistic spatial depth, and continuity over generic lateral panning.",
   ].join(" ");
 }
 
@@ -154,8 +155,9 @@ async function submitVideoJobs(client: typeof fal, signedImages: string[], promp
   const responses = await Promise.all(signedImages.map((imageUrl, index) => client.queue.submit(FAL_IMAGE_TO_VIDEO_MODEL, {
     input: {
       prompt: prompts[index],
-      image_url: imageUrl,
-      duration: String(FAL_CLIP_SECONDS) as "5" | "10",
+      start_image_url: imageUrl,
+      duration: String(FAL_CLIP_SECONDS) as "5",
+      generate_audio: false,
       negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, artificial light bloom, blur, distort, low quality, people, animals, text, logo, watermark",
       cfg_scale: 0.5,
     },
