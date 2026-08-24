@@ -96,7 +96,7 @@ export default function ProjectDetail() {
   const share = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      const message = locale === "en" ? "Project link copied — ready to share." : "تم نسخ رابط المشروع وهو جاهز للمشاركة.";
+      const message = locale === "en" ? "Project link copied. Ready to share." : "تم نسخ رابط المشروع. وهو جاهز للمشاركة.";
       setDeliveryNotice(message);
       toast.success(message);
     } catch {

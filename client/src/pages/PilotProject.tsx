@@ -3,7 +3,7 @@ import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Check, Loader2, MapPin, Spa
 import { useLocation } from "wouter";
 import { AppSidebar } from "@/components/AppChrome";
 import { trpc } from "@/lib/trpc";
-import { copy, useLocale } from "@/lib/locale";
+import { useLocale } from "@/lib/locale";
 import { getPilotGallery, type PilotGalleryId } from "@shared/pilotGalleries";
 
 type PilotLocale = "en" | "ar";
@@ -12,16 +12,16 @@ const pilotCopy = {
   en: {
     eyebrow: "Private pilot gallery",
     title: "Choose the frames that make the film.",
-    body: "These are owner-provided property galleries. Testers do not upload photos; they choose the ten strongest frames, set the order, and generate the film.",
+    body: "Choose from the owner-provided apartment or villa gallery. Select the images that tell the strongest story, set the sequence, and let the studio build the film.",
     apartment: "Apartment",
     villa: "Villa",
     ownerGallery: "Owner-provided gallery",
-    galleryBody: "Choose one property type, then select all photos in that owner-provided set.",
+    galleryBody: "Select the strongest images from the owner-provided set, then arrange your film sequence.",
     selected: "selected",
     selectExact: "Select all available photos for this film",
-    selectedOnly: "Only your selected photos will be sent to AI generation",
+    selectedOnly: "Only your selected property images enter AI production",
     sequenceTitle: "Your film sequence",
-    sequenceBody: "This order becomes the edit order. Move selected shots up or down before creating the project.",
+    sequenceBody: "Your order becomes the editorial sequence. Move any shot before production begins.",
     emptySequence: "Select the owner-provided photos above to build the film sequence.",
     details: "Test property details",
     propertyTitle: "Property title",
@@ -44,16 +44,16 @@ const pilotCopy = {
   ar: {
     eyebrow: "معرض تجريبي خاص",
     title: "اختر اللقطات التي تصنع الفيلم.",
-    body: "هذه معارض عقارية أضافها المالك. لا يرفع المختبرون صوراً؛ بل يختارون أقوى عشر لقطات، ويحددون ترتيبها، ثم ينشئون الفيلم.",
+    body: "اختر من معرض الشقة أو الفيلا الذي أضافه المالك. حدد الصور التي تحكي القصة الأقوى، ورتب التسلسل، ودع الاستوديو يبني الفيلم.",
     apartment: "شقة",
     villa: "فيلا",
     ownerGallery: "معرض أضافه المالك",
-    galleryBody: "اختر نوع العقار، ثم حدد جميع الصور من مجموعة المالك الجاهزة.",
+    galleryBody: "حدد أقوى الصور من مجموعة المالك الجاهزة، ثم رتب تسلسل الفيلم.",
     selected: "مختارة",
     selectExact: "اختر جميع الصور المتاحة لهذا الفيلم",
-    selectedOnly: "سيتم إرسال الصور المختارة فقط إلى التوليد بالذكاء الاصطناعي",
+    selectedOnly: "ستدخل صور العقار المختارة فقط في الإنتاج بالذكاء الاصطناعي",
     sequenceTitle: "تسلسل الفيلم",
-    sequenceBody: "يصبح هذا الترتيب ترتيب المونتاج. حرّك اللقطات إلى الأعلى أو الأسفل قبل إنشاء المشروع.",
+    sequenceBody: "يصبح ترتيبك هو التسلسل التحريري. حرّك أي لقطة قبل بدء الإنتاج.",
     emptySequence: "اختر الصور التي أضافها المالك أعلاه لبناء تسلسل الفيلم.",
     details: "تفاصيل العقار التجريبي",
     propertyTitle: "عنوان العقار",
