@@ -30,6 +30,30 @@ async function fetchClip(url: string) {
   return response.blob();
 }
 
+async function runWithProgress(
+  engine: FFmpeg,
+  args: string[],
+  onProgress: (progress: StitchProgress) => void,
+  start: number,
+  end: number,
+  currentStep: string,
+) {
+  const progressHandler = ({ progress }: { progress: number }) => {
+    const normalized = Math.max(0, Math.min(1, progress));
+    onProgress({ progress: Math.round(start + normalized * (end - start)), currentStep });
+  };
+  engine.on("progress", progressHandler);
+  try {
+    return await engine.exec(args);
+  } finally {
+    engine.off("progress", progressHandler);
+  }
+}
+
+function concatManifest(files: string[]) {
+  return files.map(filename => `file '${filename}'`).join("\n");
+}
+
 export async function stitchClips(
   clipUrls: string[],
   onProgress: (progress: StitchProgress) => void,
@@ -47,48 +71,64 @@ export async function stitchClips(
     files.push(filename);
   }
 
-  onProgress({ progress: 28, currentStep: "Preserving each full-length cinematic shot…" });
-  const videoFilterParts: string[] = [];
-  const videoLabels: string[] = [];
-  for (let index = 0; index < files.length; index += 1) {
-    const videoFadeIn = index === 0 ? ",fade=t=in:st=0:d=0.24" : "";
-    const videoFadeOut = index === files.length - 1 ? `,fade=t=out:st=${Math.max(0, FAL_CLIP_SECONDS - 0.36).toFixed(2)}:d=0.36` : "";
-    const videoLabel = `v${index}`;
-    videoLabels.push(videoLabel);
-    videoFilterParts.push(`[${index}:v]trim=start=0:duration=${FAL_CLIP_SECONDS},setpts=PTS-STARTPTS,fps=24,scale=1280:-2:flags=lanczos,setsar=1,format=yuv420p${videoFadeIn}${videoFadeOut}[${videoLabel}]`);
-  }
+  onProgress({ progress: 28, currentStep: "Clips are ready. Starting the silent final assembly…" });
+  await engine.writeFile("concat.txt", new TextEncoder().encode(concatManifest(files)));
 
-  // Silent hard cuts preserve every complete ten-second source clip in order.
-  const videoInputs = videoLabels.map(label => `[${label}]`).join("");
-  const videoFilterGraph = [...videoFilterParts, `${videoInputs}concat=n=${files.length}:v=1:a=0,format=yuv420p[edited]`].join(";");
-  const inputs = files.flatMap(filename => ["-i", filename]);
-  const encodeArgs = [
-    ...inputs,
-    "-filter_complex", videoFilterGraph,
-    "-map", "[edited]",
+  // The pilot clips share the same H.264 video format. Try a stream-copy concat
+  // first because it preserves the source motion and uses dramatically less memory
+  // than decoding and re-encoding ten large clips in a browser worker.
+  const copyArgs = [
+    "-f", "concat",
+    "-safe", "0",
+    "-i", "concat.txt",
     "-an",
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-crf", "27",
-    "-maxrate", "4M",
-    "-bufsize", "8M",
-    "-pix_fmt", "yuv420p",
+    "-c", "copy",
     "-movflags", "+faststart",
     "final-reel.mp4",
   ];
-  const primaryExitCode = await engine.exec(encodeArgs);
-  if (primaryExitCode !== 0) {
-    const fallbackArgs = encodeArgs.slice();
-    const codecIndex = fallbackArgs.indexOf("libx264");
-    if (codecIndex >= 0) fallbackArgs[codecIndex] = "mpeg4";
-    fallbackArgs.splice(fallbackArgs.indexOf("-crf"), 2, "-q:v", "6");
-    const fallbackExitCode = await engine.exec(fallbackArgs);
-    if (fallbackExitCode !== 0) {
-      throw new Error(`The final reel could not be assembled (FFmpeg exit code ${fallbackExitCode}).`);
+  const copyExitCode = await runWithProgress(engine, copyArgs, onProgress, 30, 90, "Combining the full-length clips without re-encoding…");
+
+  if (copyExitCode !== 0) {
+    onProgress({ progress: 30, currentStep: "Normalizing the clips for a compatible silent export…" });
+    const videoFilterParts: string[] = [];
+    const videoLabels: string[] = [];
+    for (let index = 0; index < files.length; index += 1) {
+      const videoLabel = `v${index}`;
+      videoLabels.push(videoLabel);
+      videoFilterParts.push(`[${index}:v]trim=start=0:duration=${FAL_CLIP_SECONDS},setpts=PTS-STARTPTS,fps=24,scale=1280:-2:flags=lanczos,setsar=1,format=yuv420p[${videoLabel}]`);
+    }
+
+    const videoInputs = videoLabels.map(label => `[${label}]`).join("");
+    const videoFilterGraph = [...videoFilterParts, `${videoInputs}concat=n=${files.length}:v=1:a=0,format=yuv420p[edited]`].join(";");
+    const inputs = files.flatMap(filename => ["-i", filename]);
+    const encodeArgs = [
+      ...inputs,
+      "-filter_complex", videoFilterGraph,
+      "-map", "[edited]",
+      "-an",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "27",
+      "-maxrate", "4M",
+      "-bufsize", "8M",
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+      "final-reel.mp4",
+    ];
+    const primaryExitCode = await runWithProgress(engine, encodeArgs, onProgress, 32, 90, "Encoding the final silent reel…");
+    if (primaryExitCode !== 0) {
+      const fallbackArgs = encodeArgs.slice();
+      const codecIndex = fallbackArgs.indexOf("libx264");
+      if (codecIndex >= 0) fallbackArgs[codecIndex] = "mpeg4";
+      fallbackArgs.splice(fallbackArgs.indexOf("-crf"), 2, "-q:v", "6");
+      const fallbackExitCode = await runWithProgress(engine, fallbackArgs, onProgress, 32, 90, "Using the compatible browser video encoder…");
+      if (fallbackExitCode !== 0) {
+        throw new Error(`The final reel could not be assembled (FFmpeg exit code ${fallbackExitCode}).`);
+      }
     }
   }
 
-  onProgress({ progress: 96, currentStep: "Polishing the final editorial cut for download…" });
+  onProgress({ progress: 96, currentStep: "Final silent reel assembled and ready for download…" });
   const output = await engine.readFile("final-reel.mp4");
   const bytes = typeof output === "string" ? new TextEncoder().encode(output) : output;
   const buffer = new ArrayBuffer(bytes.byteLength);
