@@ -2,6 +2,7 @@ import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
 import coreURL from "@ffmpeg/core?url";
 import wasmURL from "@ffmpeg/core/wasm?url";
+import { FAL_CLIP_SECONDS } from "@shared/video";
 
 export type StitchProgress = {
   progress: number;
@@ -46,32 +47,21 @@ export async function stitchClips(
     files.push(filename);
   }
 
-  onProgress({ progress: 28, currentStep: "Shaping the property film with editorial pacing…" });
-  const shotPlans = [
-    { start: 0.25, duration: 3.35 }, // hero waterfront reveal
-    { start: 0.15, duration: 3.75 }, // living-room spatial reveal
-    { start: 0.70, duration: 2.40 }, // kitchen/dining material cutaway
-    { start: 0.35, duration: 3.15 }, // bedroom breathing point
-    { start: 0.80, duration: 2.25 }, // bathroom finish detail
-  ];
+  onProgress({ progress: 28, currentStep: "Preserving each full-length cinematic shot…" });
   const filterParts: string[] = [];
   const shotLabels: string[] = [];
   for (let index = 0; index < files.length; index += 1) {
-    const plan = shotPlans[index] ?? { start: 0.25, duration: 3 };
     const fadeIn = index === 0 ? ",fade=t=in:st=0:d=0.24" : "";
-    const fadeOut = index === files.length - 1 ? `,fade=t=out:st=${Math.max(0, plan.duration - 0.36).toFixed(2)}:d=0.36` : "";
+    const fadeOut = index === files.length - 1 ? `,fade=t=out:st=${Math.max(0, FAL_CLIP_SECONDS - 0.36).toFixed(2)}:d=0.36` : "";
     const label = `s${index}`;
     shotLabels.push(label);
-    filterParts.push(`[${index}:v]trim=start=${plan.start}:duration=${plan.duration},setpts=PTS-STARTPTS,fps=24,scale=1280:-2:flags=lanczos,setsar=1,format=yuv420p${fadeIn}${fadeOut}[${label}]`);
+    filterParts.push(`[${index}:v]trim=start=0:duration=${FAL_CLIP_SECONDS},setpts=PTS-STARTPTS,fps=24,scale=1280:-2:flags=lanczos,setsar=1,format=yuv420p${fadeIn}${fadeOut}[${label}]`);
   }
 
-  // Use one restrained opening dissolve; the remaining changes are editorial hard cuts
-  // so the reel feels authored rather than like a slideshow with a transition on every card.
-  const openingDissolve = 0.22;
-  const firstShotDuration = shotPlans[0]?.duration ?? 3.35;
-  filterParts.push(`[${shotLabels[0]}][${shotLabels[1]}]xfade=transition=fade:duration=${openingDissolve}:offset=${(firstShotDuration - openingDissolve).toFixed(2)}[opening]`);
-  const editInputs = ["opening", ...shotLabels.slice(2)].map(label => `[${label}]`).join("");
-  filterParts.push(`${editInputs}concat=n=${files.length - 1}:v=1:a=0,format=yuv420p[edited]`);
+  // Keep every source clip at its complete ten-second duration. Hard cuts preserve
+  // the requested timing and avoid transitions that make the reel feel like a slideshow.
+  const editInputs = shotLabels.map(label => `[${label}]`).join("");
+  filterParts.push(`${editInputs}concat=n=${files.length}:v=1:a=0,format=yuv420p[edited]`);
   const filterGraph = filterParts.join(";");
   const inputs = files.flatMap(filename => ["-i", filename]);
   const encodeArgs = [
