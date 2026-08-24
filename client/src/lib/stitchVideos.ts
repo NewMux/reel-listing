@@ -76,14 +76,16 @@ export async function stitchClips(
     "-movflags", "+faststart",
     "final-reel.mp4",
   ];
-  try {
-    await engine.exec(encodeArgs);
-  } catch {
+  const primaryExitCode = await engine.exec(encodeArgs);
+  if (primaryExitCode !== 0) {
     const fallbackArgs = encodeArgs.slice();
     const codecIndex = fallbackArgs.indexOf("libx264");
     if (codecIndex >= 0) fallbackArgs[codecIndex] = "mpeg4";
     fallbackArgs.splice(fallbackArgs.indexOf("-crf"), 2, "-q:v", "6");
-    await engine.exec(fallbackArgs);
+    const fallbackExitCode = await engine.exec(fallbackArgs);
+    if (fallbackExitCode !== 0) {
+      throw new Error(`The final reel could not be assembled (FFmpeg exit code ${fallbackExitCode}).`);
+    }
   }
 
   onProgress({ progress: 96, currentStep: "Polishing the final editorial cut for download…" });
