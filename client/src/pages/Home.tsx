@@ -4,9 +4,10 @@ import { Footer, PublicNav } from "@/components/AppChrome";
 import { copy, useLocale } from "@/lib/locale";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
+import { getPilotGallery } from "@shared/pilotGalleries";
 
-const HERO_IMAGE = "/manus-storage/vistaflow-hero-villa_56a66b5b.webp";
-const LIVING_IMAGE = "/manus-storage/vistaflow-living-room_aa6abb6a.webp";
+const HERO_IMAGE = getPilotGallery("villa")[0]?.url ?? "";
+const LIVING_IMAGE = getPilotGallery("apartment")[0]?.url ?? "";
 
 export default function Home() {
   const { locale } = useLocale(); const t = copy[locale]; const { user } = useAuth(); const [, setLocation] = useLocation();
