@@ -71,6 +71,12 @@ function buildCinematicPrompt(index: number, direction: { shotType: string; came
   ].join(" ");
 }
 
+async function getFalSourceUrls(project: VideoProject, accessToken?: string | null) {
+  return Promise.all(project.mediaKeys.map((key, index) => key.startsWith("pilot:")
+    ? project.mediaUrls[index]
+    : storageGetSignedUrl(key, accessToken ?? undefined)));
+}
+
 function getFalClient() {
   if (!ENV.falKey) {
     throw new Error("fal.ai is not configured yet. Add FAL_KEY to the server environment before rendering.");
@@ -167,7 +173,7 @@ async function submitVideoJobs(client: typeof fal, signedImages: string[], promp
 
 export async function submitFalRender(userId: number, project: VideoProject, accessToken?: string | null) {
   const client = getFalClient();
-  const signedImages = await Promise.all(project.mediaKeys.map(key => storageGetSignedUrl(key, accessToken ?? undefined)));
+  const signedImages = await getFalSourceUrls(project, accessToken);
   const promptRequestIds = await submitVisionPromptJobs(client, signedImages, project);
   const emptyPrompts = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
   const emptyClips = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
@@ -199,7 +205,7 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
   const promptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
   const generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
   const signedImages = project.mediaKeys.length === project.mediaUrls.length
-    ? await Promise.all(project.mediaKeys.map(key => storageGetSignedUrl(key, accessToken ?? undefined)))
+    ? await getFalSourceUrls(project, accessToken)
     : [];
   const client = getFalClient();
   let failedMessage: string | null = null;

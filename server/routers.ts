@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { getPilotGallery, pilotGalleryIds } from "../shared/pilotGalleries";
 import { MAX_PROPERTY_MEDIA_BYTES, MAX_PROPERTY_PHOTOS } from "../shared/video";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -30,19 +31,24 @@ function projectIdInput(id: number) {
   }
 }
 
+function isPilotMediaKey(key: string) {
+  return key.startsWith("pilot:");
+}
+
+async function presentSourceUrls(project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null) {
+  if (!accessToken) return project.mediaUrls;
+  return Promise.all(project.mediaKeys.map((key, index) => isPilotMediaKey(key) ? project.mediaUrls[index] : storageGetSignedUrl(key, accessToken)));
+}
+
 async function presentProject(project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null) {
   if (!project) return project;
-  const mediaUrls = accessToken
-    ? await Promise.all(project.mediaKeys.map(key => storageGetSignedUrl(key, accessToken)))
-    : project.mediaUrls;
+  const mediaUrls = await presentSourceUrls(project, accessToken);
   return { ...project, mediaUrls, finalVideoUrl: await signStoredUrl(project.finalVideoUrl, accessToken) };
 }
 
 async function presentRender(snapshot: Awaited<ReturnType<typeof getProjectRenderStatus>>, project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null) {
   if (!project) return snapshot;
-  const sourceUrls = accessToken
-    ? await Promise.all(project.mediaKeys.map(key => storageGetSignedUrl(key, accessToken)))
-    : project.mediaUrls;
+  const sourceUrls = await presentSourceUrls(project, accessToken);
   return {
     ...snapshot,
     finalVideoUrl: await signStoredUrl(snapshot.finalVideoUrl, accessToken),
@@ -101,6 +107,34 @@ export const appRouter = router({
             message: error instanceof Error ? error.message : "Unable to create this project.",
           });
         }
+      }),
+    createPilot: protectedProcedure
+      .input(z.object({
+        gallery: z.enum(pilotGalleryIds),
+        imageIds: z.array(z.string().min(1).max(80)).length(MAX_PROPERTY_PHOTOS),
+        title: z.string().trim().min(2).max(160),
+        description: z.string().trim().max(1_000).optional(),
+        location: z.string().trim().min(2).max(180),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const gallery = getPilotGallery(input.gallery);
+        const selected = input.imageIds.map(id => gallery.find(image => image.id === id));
+        if (gallery.length !== MAX_PROPERTY_PHOTOS || selected.some(image => !image) || new Set(input.imageIds).size !== input.imageIds.length) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Choose exactly 10 owner-provided photos from this pilot gallery." });
+        }
+        const images = selected.filter((image): image is NonNullable<typeof image> => Boolean(image));
+        const id = await createVideoProject({
+          userId: ctx.user.id,
+          title: input.title,
+          description: input.description || null,
+          location: input.location,
+          mediaUrls: images.map(image => image.url),
+          mediaKeys: images.map(image => `pilot:${input.gallery}/${image.id}`),
+          mediaNames: images.map(image => image.name),
+          mediaTypes: images.map(() => "image/png"),
+          status: "Review",
+        });
+        return { id };
       }),
     approve: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       projectIdInput(input.id);
