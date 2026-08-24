@@ -4,6 +4,7 @@ import {
   FAL_CLIP_SECONDS,
   FAL_GENERATE_AUDIO,
   FAL_IMAGE_TO_VIDEO_MODEL,
+  FAL_PROMPT_MAX_CHARS,
   FAL_VISION_LLM_MODEL,
   FAL_VISION_PROMPT_MODEL,
 } from "../shared/video";
@@ -57,6 +58,17 @@ function cleanDirection(value: unknown, fallback: string) {
   return cleaned.length >= 3 ? cleaned.slice(0, 360) : fallback;
 }
 
+function limitPrompt(value: string) {
+  const normalized = value.replace(/[\n\r]+/g, " ").replace(/\s+/g, " ").trim();
+  if (normalized.length <= FAL_PROMPT_MAX_CHARS) return normalized;
+  return `${normalized.slice(0, FAL_PROMPT_MAX_CHARS - 1).trimEnd()}.`;
+}
+
+function compactDirection(value: string, maxLength: number) {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 1).trimEnd()}.`;
+}
+
 function normalizeShotType(value: unknown) {
   const text = typeof value === "string" ? value.toLowerCase() : "";
   if (text.includes("outdoor") || text.includes("terrace") || text.includes("balcony") || text.includes("view") || text.includes("water")) return "outdoor-view";
@@ -84,17 +96,20 @@ function fallbackDirection(index: number) {
   return directions[index % directions.length];
 }
 
-function buildCinematicPrompt(index: number, direction: { shotType: string; cameraMove: string; lighting: string; focus: string }, project: VideoProject) {
-  return [
+export function buildCinematicPrompt(index: number, direction: { shotType: string; cameraMove: string; lighting: string; focus: string }, project: VideoProject) {
+  const cameraMove = compactDirection(direction.cameraMove, 220);
+  const lighting = compactDirection(direction.lighting, 140);
+  const focus = compactDirection(direction.focus, 140);
+  return limitPrompt([
     CINEMATIC_LOCK,
     `Shot type: ${direction.shotType}.`,
-    `Camera choreography: ${direction.cameraMove}.`,
     `Required movement variation for this shot: ${movementDirective(index)}. Use this movement family and do not repeat a generic lateral pan.`,
-    `Light behavior: ${direction.lighting}.`,
-    `Visual focus: ${direction.focus}.`,
+    `Camera choreography: ${cameraMove}.`,
+    `Light behavior: ${lighting}.`,
+    `Visual focus: ${focus}.`,
     `This is shot ${index + 1} in a ${project.mediaUrls.length}-shot property film for ${propertyContext(project)}.`,
     "Generate a premium architectural image-to-video shot with Kling 3 Pro. Favor a smooth gimbal-like move, clear shot intention, realistic spatial depth, and continuity over generic lateral panning.",
-  ].join(" ");
+  ].join(" "));
 }
 
 async function getFalSourceUrls(project: VideoProject, accessToken?: string | null) {
@@ -185,7 +200,7 @@ async function submitVisionPromptJobs(client: typeof fal, signedImages: string[]
 async function submitVideoJobs(client: typeof fal, signedImages: string[], prompts: string[]) {
   const responses = await Promise.all(signedImages.map((imageUrl, index) => client.queue.submit(FAL_IMAGE_TO_VIDEO_MODEL, {
     input: {
-      prompt: prompts[index],
+      prompt: limitPrompt(prompts[index]),
       start_image_url: imageUrl,
       duration: String(FAL_CLIP_SECONDS) as "10",
       generate_audio: FAL_GENERATE_AUDIO,

@@ -6,6 +6,8 @@ export const FAL_VISION_PROMPT_MODEL = "openrouter/router/vision";
 export const FAL_VISION_LLM_MODEL = "google/gemini-2.5-flash";
 export const FAL_CLIP_SECONDS = 10;
 export const FAL_GENERATE_AUDIO = false;
+/** Keep Kling prompt payloads below fal.ai's documented 2,500-character input ceiling. */
+export const FAL_PROMPT_MAX_CHARS = 2_300;
 
 export type ProjectStatus = (typeof projectStatuses)[number];
 

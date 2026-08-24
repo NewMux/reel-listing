@@ -4,7 +4,7 @@ import { FAL_CLIP_SECONDS } from "../shared/video";
 export { FAL_CLIP_SECONDS };
 export const CINEMATIC_CLIP_SECONDS = FAL_CLIP_SECONDS;
 
-type ShotState = "queued" | "rendering" | "complete";
+type ShotState = "queued" | "rendering" | "complete" | "failed";
 
 export type Shot = {
   index: number;
@@ -67,9 +67,11 @@ function makeShots(
     ...shot,
     state: clipUrls[shot.index] || phase === "complete"
       ? "complete"
-      : phase === "generating" && requestIds[shot.index]
-        ? "rendering"
-        : "queued",
+      : phase === "failed" && requestIds[shot.index]
+        ? "failed"
+        : phase === "generating" && requestIds[shot.index]
+          ? "rendering"
+          : "queued",
     clipUrl: clipUrls[shot.index] || null,
   }));
 }
