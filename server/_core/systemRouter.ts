@@ -14,7 +14,7 @@ export const systemRouter = router({
       ok: true,
       videoModel: FAL_IMAGE_TO_VIDEO_MODEL,
       clipSeconds: FAL_CLIP_SECONDS,
-      promptStyle: "cinematic-gimbal-v1",
+      promptStyle: "cinematic-gimbal-immediate-v2",
     })),
 
   notifyOwner: adminProcedure
