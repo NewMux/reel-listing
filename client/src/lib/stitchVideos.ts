@@ -46,30 +46,38 @@ export async function stitchClips(
     files.push(filename);
   }
 
-  onProgress({ progress: 28, currentStep: "Cutting the cinematic sequence in upload order…" });
-  const transitions = ["fadeblack", "fade", "smoothup", "fadeblack"];
-  const transitionDurations = [0.45, 0.35, 0.4, 0.45];
+  onProgress({ progress: 28, currentStep: "Shaping the property film with editorial pacing…" });
+  const shotPlans = [
+    { start: 0.25, duration: 3.35 }, // hero waterfront reveal
+    { start: 0.15, duration: 3.75 }, // living-room spatial reveal
+    { start: 0.70, duration: 2.40 }, // kitchen/dining material cutaway
+    { start: 0.35, duration: 3.15 }, // bedroom breathing point
+    { start: 0.80, duration: 2.25 }, // bathroom finish detail
+  ];
   const filterParts: string[] = [];
+  const shotLabels: string[] = [];
   for (let index = 0; index < files.length; index += 1) {
-    const ending = index === files.length - 1 ? ",fade=t=out:st=4.55:d=0.45" : "";
-    filterParts.push(`[${index}:v]trim=duration=5,setpts=PTS-STARTPTS,fps=24,scale=1280:-2,setsar=1,format=yuv420p${index === 0 ? ",fade=t=in:st=0:d=0.35" : ""}${ending}[v${index}]`);
+    const plan = shotPlans[index] ?? { start: 0.25, duration: 3 };
+    const fadeIn = index === 0 ? ",fade=t=in:st=0:d=0.24" : "";
+    const fadeOut = index === files.length - 1 ? `,fade=t=out:st=${Math.max(0, plan.duration - 0.36).toFixed(2)}:d=0.36` : "";
+    const label = `s${index}`;
+    shotLabels.push(label);
+    filterParts.push(`[${index}:v]trim=start=${plan.start}:duration=${plan.duration},setpts=PTS-STARTPTS,fps=24,scale=1280:-2:flags=lanczos,setsar=1,format=yuv420p${fadeIn}${fadeOut}[${label}]`);
   }
-  let previousLabel = "v0";
-  let timelineDuration = 5;
-  for (let index = 1; index < files.length; index += 1) {
-    const transitionDuration = transitionDurations[(index - 1) % transitionDurations.length];
-    const offset = Math.max(0, timelineDuration - transitionDuration);
-    const nextLabel = `x${index}`;
-    filterParts.push(`[${previousLabel}][v${index}]xfade=transition=${transitions[(index - 1) % transitions.length]}:duration=${transitionDuration}:offset=${offset.toFixed(2)}[${nextLabel}]`);
-    previousLabel = nextLabel;
-    timelineDuration += 5 - transitionDuration;
-  }
+
+  // Use one restrained opening dissolve; the remaining changes are editorial hard cuts
+  // so the reel feels authored rather than like a slideshow with a transition on every card.
+  const openingDissolve = 0.22;
+  const firstShotDuration = shotPlans[0]?.duration ?? 3.35;
+  filterParts.push(`[${shotLabels[0]}][${shotLabels[1]}]xfade=transition=fade:duration=${openingDissolve}:offset=${(firstShotDuration - openingDissolve).toFixed(2)}[opening]`);
+  const editInputs = ["opening", ...shotLabels.slice(2)].map(label => `[${label}]`).join("");
+  filterParts.push(`${editInputs}concat=n=${files.length - 1}:v=1:a=0,format=yuv420p[edited]`);
   const filterGraph = filterParts.join(";");
   const inputs = files.flatMap(filename => ["-i", filename]);
   const encodeArgs = [
     ...inputs,
     "-filter_complex", filterGraph,
-    "-map", `[${previousLabel}]`,
+    "-map", "[edited]",
     "-an",
     "-c:v", "libx264",
     "-preset", "veryfast",
