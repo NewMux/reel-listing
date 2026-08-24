@@ -57,7 +57,10 @@ export default function ProjectDetail() {
       const finalBlob = await stitchClips(clipUrls as string[], progress => setAssemblyProgress(progress));
       const target = await createOutputTarget.mutateAsync({ name: `${safeFileName(project.data?.title || "reel-listing-film")}.mp4`, type: "video/mp4" });
       const upload = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": "video/mp4" }, body: finalBlob });
-      if (!upload.ok) throw new Error(`The final reel could not be saved (${upload.status}).`);
+      if (!upload.ok) {
+        const providerMessage = (await upload.text().catch(() => "")).trim();
+        throw new Error(providerMessage ? `The final reel could not be saved (${upload.status}): ${providerMessage.slice(0, 240)}` : `The final reel could not be saved (${upload.status}).`);
+      }
       await complete.mutateAsync({ id, finalVideoUrl: target.url });
       setLocalFinalVideoUrl(target.url);
       setAssemblyProgress({ progress: 100, currentStep: locale === "en" ? "Your cinematic reel is ready to share." : "فيلمك السينمائي جاهز للمشاركة." });
