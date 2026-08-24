@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { notifyOwner } from "./notification";
 import { adminProcedure, publicProcedure, router } from "./trpc";
-import { FAL_CLIP_SECONDS, FAL_IMAGE_TO_VIDEO_MODEL } from "../../shared/video";
+import { FAL_CLIP_SECONDS, FAL_GENERATE_AUDIO, FAL_IMAGE_TO_VIDEO_MODEL } from "../../shared/video";
 
 export const systemRouter = router({
   health: publicProcedure
@@ -14,7 +14,8 @@ export const systemRouter = router({
       ok: true,
       videoModel: FAL_IMAGE_TO_VIDEO_MODEL,
       clipSeconds: FAL_CLIP_SECONDS,
-      promptStyle: "cinematic-gimbal-immediate-v2",
+      promptStyle: "silent-camera-only-gimbal-v3",
+      audioEnabled: FAL_GENERATE_AUDIO,
     })),
 
   notifyOwner: adminProcedure

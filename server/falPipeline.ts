@@ -29,8 +29,8 @@ const CINEMATIC_LOCK = [
   "Use one continuous ten-second gimbal-like camera move that starts immediately on the first frame, with visible forward, lateral, or arcing travel selected to suit the composition, sustained parallax through the middle, and natural motion through the final frame.",
   "The camera should feel as if it is operated on a stabilized professional gimbal at eye level, with purposeful movement from start to finish, smooth acceleration and deceleration, no static opening or closing hold, no abrupt changes, and no presentation-style slideshow motion.",
   "Use a rectilinear 24–35mm architectural-lens look with straight verticals; no handheld shake, snap zoom, whip pan, time lapse, orbiting spin, or exaggerated lens distortion.",
-  "Animate only believable environmental motion such as a gentle change in daylight, water shimmer, curtain movement, foliage movement, or controlled specular highlights when supported by the image.",
-  "If native audio is generated, keep it subtle and natural to the visible scene, such as water, breeze, room tone, fabric, or soft architectural ambience. Do not add voices, dialogue, sound effects, or music.",
+  "Keep the shot camera-led and continuous. Do not stage a sequence of visual steps, object reveals, lighting changes, before-and-after moments, or artificial scene progression. Allow only minimal natural movement already supported by the image.",
+  "No audio. Generate a completely silent video with no voice, dialogue, ambience, sound effects, or music.",
   "Do not change the room, add or remove furniture, move walls, invent doors or windows, alter the view, or introduce people, animals, text, logos, or watermarks.",
 ].join(" ");
 
@@ -165,7 +165,7 @@ async function submitVideoJobs(client: typeof fal, signedImages: string[], promp
       start_image_url: imageUrl,
       duration: String(FAL_CLIP_SECONDS) as "10",
       generate_audio: FAL_GENERATE_AUDIO,
-      negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, generic left-to-right pan, slideshow motion, artificial light bloom, blur, distort, low quality, people, animals, text, logo, watermark",
+      negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, generic left-to-right pan, slideshow motion, static frame, visual step change, object reveal, lighting change, before-and-after effect, artificial light bloom, blur, distort, low quality, audio, voice, dialogue, music, people, animals, text, logo, watermark",
       cfg_scale: 0.5,
     },
   })));
