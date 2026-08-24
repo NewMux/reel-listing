@@ -44,14 +44,29 @@ const SHOT_BLUEPRINTS = [
   { roomType: "Closing frame", prompt: "Unhurried pull-back to the hero composition." },
 ] as const;
 
+function roomLabelFromPrompt(prompt: string | null | undefined, index: number) {
+  const match = prompt?.match(/Shot type:\s*([a-z-]+)/i);
+  const shotType = match?.[1]?.toLowerCase();
+  const labels: Record<string, string> = {
+    "outdoor-view": "Exterior / view",
+    "living-room": "Living space",
+    "kitchen-dining": "Kitchen / dining",
+    bedroom: "Bedroom",
+    bathroom: "Bathroom",
+    detail: "Property detail",
+  };
+  return labels[shotType || ""] || `Property detail ${index + 1}`;
+}
+
 export function getShotPlan(mediaUrls: string[], generatedPrompts: (string | null)[] = []) {
   return mediaUrls.map((sourceUrl, index) => {
     const blueprint = SHOT_BLUEPRINTS[index % SHOT_BLUEPRINTS.length];
+    const prompt = generatedPrompts[index] || blueprint.prompt;
     return {
       index,
       sourceUrl,
-      roomType: blueprint.roomType,
-      prompt: generatedPrompts[index] || blueprint.prompt,
+      roomType: generatedPrompts[index] ? roomLabelFromPrompt(generatedPrompts[index], index) : `Property detail ${index + 1}`,
+      prompt,
     };
   });
 }

@@ -5,14 +5,20 @@ describe("render pipeline", () => {
   it("creates one ordered shot direction per property photo", () => {
     const shots = getShotPlan(Array.from({ length: 10 }, (_, index) => `/manus-storage/photo-${index}.jpg`));
     expect(shots).toHaveLength(10);
-    expect(shots[0]).toMatchObject({ index: 0, roomType: "Exterior" });
-    expect(shots[9]).toMatchObject({ index: 9, roomType: "Closing frame" });
+    expect(shots[0]).toMatchObject({ index: 0, roomType: "Property detail 1" });
+    expect(shots[9]).toMatchObject({ index: 9, roomType: "Property detail 10" });
     expect(shots.map(shot => shot.index)).toEqual(Array.from({ length: 10 }, (_, index) => index));
   });
 
-  it("uses generated AI direction when it is available for a photo", () => {
-    const shots = getShotPlan(["/manus-storage/one.jpg"], ["AI-generated slow dolly across the sunlit living room."]);
-    expect(shots[0]?.prompt).toBe("AI-generated slow dolly across the sunlit living room.");
+  it("uses generated AI direction and a confirmed room label when available", () => {
+    const shots = getShotPlan(["/manus-storage/one.jpg"], ["Shot type: kitchen-dining. Classification confidence is conservative."]);
+    expect(shots[0]?.prompt).toContain("Shot type: kitchen-dining.");
+    expect(shots[0]?.roomType).toBe("Kitchen / dining");
+  });
+
+  it("uses a generic property label when no generated classification is available", () => {
+    const shots = getShotPlan(["/manus-storage/one.jpg"], [null]);
+    expect(shots[0]?.roomType).toBe("Property detail 1");
   });
 
   it("reports a completed project as a fully assembled reel", () => {
