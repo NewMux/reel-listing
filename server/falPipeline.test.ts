@@ -21,6 +21,6 @@ describe("fal.ai prompt construction", () => {
 
     expect(prompt.length).toBeLessThanOrEqual(FAL_PROMPT_MAX_CHARS);
     expect(prompt).toContain("No audio.");
-    expect(prompt).toContain("a restrained descending gimbal move");
+    expect(prompt).toContain("a restrained descending gimbal drift");
   });
 });

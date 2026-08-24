@@ -29,12 +29,12 @@ const MOVEMENT_DIRECTIVES = [
   "a smooth lateral gimbal track that creates clear foreground-to-background parallax",
   "a measured diagonal gimbal move that travels across the room’s main perspective",
   "a gentle gimbal arc around the dominant architectural feature while keeping verticals straight",
-  "a controlled rising gimbal reveal that opens the upper volume without changing the room",
+  "a controlled gentle gimbal lift that follows the room’s existing vertical lines without changing the room",
   "a slow backward gimbal pull that reveals more context while preserving the exact composition",
   "a precise side-to-side gimbal glide past the nearest visible foreground edge",
   "a calm corner-to-corner gimbal travel that follows the strongest sightline",
   "a subtle forward-and-lateral gimbal drift toward the brightest visible opening",
-  "a restrained descending gimbal move that settles attention on the most important material detail",
+  "a restrained descending gimbal drift along the nearest visible material plane",
 ] as const;
 
 function movementDirective(index: number) {
@@ -44,10 +44,10 @@ function movementDirective(index: number) {
 const CINEMATIC_LOCK = [
   "Use the supplied image as the exact first frame and preserve its room, architecture, furniture, finishes, windows, landscaping, horizon, and proportions.",
   "Create a premium editorial property-film shot with a natural architectural perspective, restrained luxury, realistic exposure, subtle depth, and believable parallax.",
-  "Use one continuous ten-second gimbal-like camera move that starts immediately on the first frame, with visible forward, lateral, or arcing travel selected to suit the composition, sustained parallax through the middle, and natural motion through the final frame.",
+  "Use one continuous ten-second camera move that starts immediately on the first frame, with a single physically plausible forward, lateral, diagonal, vertical, or arcing travel selected to suit the composition, sustained parallax through the middle, and natural motion through the final frame.",
   "The camera should feel as if it is operated on a stabilized professional gimbal at eye level, with purposeful movement from start to finish, smooth acceleration and deceleration, no static opening or closing hold, no abrupt changes, and no presentation-style slideshow motion.",
   "Use a rectilinear 24–35mm architectural-lens look with straight verticals; no handheld shake, snap zoom, whip pan, time lapse, orbiting spin, or exaggerated lens distortion.",
-  "Keep the shot camera-led and continuous. Do not stage a sequence of visual steps, object reveals, lighting changes, before-and-after moments, or artificial scene progression. Allow only minimal natural movement already supported by the image.",
+  "Keep the shot camera-led and continuous. Do not stage a sequence of visual steps, object reveals, lighting changes, before-and-after moments, or artificial scene progression. Do not make the camera orbit, spin, or float through walls. Allow only minimal natural movement already supported by the image.",
   "No audio. Generate a completely silent video with no voice, dialogue, ambience, sound effects, or music.",
   "Do not change the room, add or remove furniture, move walls, invent doors or windows, alter the view, or introduce people, animals, text, logos, or watermarks.",
 ].join(" ");

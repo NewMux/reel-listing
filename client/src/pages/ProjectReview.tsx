@@ -12,8 +12,8 @@ const shotNames = {
 } as const;
 
 const shotPrompts = {
-  en: ["Slow cinematic push-in", "Gentle lateral drift", "Measured detail move", "Soft editorial glide", "Quiet forward reveal", "Subtle floating move", "Slow outdoor arc", "Steady horizon reveal", "Delicate architectural drift", "Unhurried pull-back"],
-  ar: ["اقتراب سينمائي بطيء", "انجراف جانبي لطيف", "حركة تفصيلية متزنة", "انزلاق تحريري ناعم", "كشف أمامي هادئ", "حركة عائمة رقيقة", "قوس خارجي بطيء", "كشف ثابت للأفق", "انجراف معماري رقيق", "تراجع هادئ"],
+  en: ["Forward gimbal travel", "Lateral gimbal track", "Diagonal dolly move", "Shallow architectural arc", "Subtle vertical lift", "Backward context pull", "Foreground slide", "Corner-to-corner track", "Forward and lateral drift", "Gentle descending move"],
+  ar: ["حركة جيمبال أمامية", "مسار جيمبال جانبي", "حركة دولي قطرية", "قوس معماري هادئ", "ارتفاع رأسي دقيق", "تراجع لإظهار السياق", "انزلاق أمامي سلس", "مسار من زاوية إلى أخرى", "انجراف أمامي وجانبي", "هبوط لطيف"],
 } as const;
 
 export default function ProjectReview() {

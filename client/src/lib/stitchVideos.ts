@@ -49,40 +49,25 @@ export async function stitchClips(
 
   onProgress({ progress: 28, currentStep: "Preserving each full-length cinematic shot…" });
   const videoFilterParts: string[] = [];
-  const audioFilterParts: string[] = [];
   const videoLabels: string[] = [];
-  const audioLabels: string[] = [];
   for (let index = 0; index < files.length; index += 1) {
     const videoFadeIn = index === 0 ? ",fade=t=in:st=0:d=0.24" : "";
     const videoFadeOut = index === files.length - 1 ? `,fade=t=out:st=${Math.max(0, FAL_CLIP_SECONDS - 0.36).toFixed(2)}:d=0.36` : "";
-    const audioFadeIn = index === 0 ? ",afade=t=in:st=0:d=0.24" : "";
-    const audioFadeOut = index === files.length - 1 ? `,afade=t=out:st=${Math.max(0, FAL_CLIP_SECONDS - 0.36).toFixed(2)}:d=0.36` : "";
     const videoLabel = `v${index}`;
-    const audioLabel = `a${index}`;
     videoLabels.push(videoLabel);
-    audioLabels.push(audioLabel);
     videoFilterParts.push(`[${index}:v]trim=start=0:duration=${FAL_CLIP_SECONDS},setpts=PTS-STARTPTS,fps=24,scale=1280:-2:flags=lanczos,setsar=1,format=yuv420p${videoFadeIn}${videoFadeOut}[${videoLabel}]`);
-    audioFilterParts.push(`[${index}:a]atrim=start=0:duration=${FAL_CLIP_SECONDS},asetpts=PTS-STARTPTS,aresample=48000${audioFadeIn}${audioFadeOut}[${audioLabel}]`);
   }
 
-  // Keep every source clip at its complete ten-second duration. Hard cuts preserve
-  // the requested timing and avoid transitions that make the reel feel like a slideshow.
+  // Silent hard cuts preserve every complete ten-second source clip in order.
   const videoInputs = videoLabels.map(label => `[${label}]`).join("");
-  const audioInputs = audioLabels.map(label => `[${label}]`).join("");
-  const videoConcat = `${videoInputs}concat=n=${files.length}:v=1:a=0,format=yuv420p[edited]`;
-  const audioConcat = `${audioInputs}concat=n=${files.length}:v=0:a=1,aresample=async=1:first_pts=0[audio]`;
-  const filterGraph = [...videoFilterParts, ...audioFilterParts, videoConcat, audioConcat].join(";");
-  const videoOnlyFilterGraph = [...videoFilterParts, videoConcat].join(";");
+  const videoFilterGraph = [...videoFilterParts, `${videoInputs}concat=n=${files.length}:v=1:a=0,format=yuv420p[edited]`].join(";");
   const inputs = files.flatMap(filename => ["-i", filename]);
   const encodeArgs = [
     ...inputs,
-    "-filter_complex", filterGraph,
+    "-filter_complex", videoFilterGraph,
     "-map", "[edited]",
-    "-map", "[audio]",
+    "-an",
     "-c:v", "libx264",
-    "-c:a", "aac",
-    "-b:a", "128k",
-    "-shortest",
     "-preset", "veryfast",
     "-crf", "27",
     "-maxrate", "4M",
@@ -94,30 +79,11 @@ export async function stitchClips(
   try {
     await engine.exec(encodeArgs);
   } catch {
-    // If a provider clip has no audio stream, preserve the full visual edit instead of failing the project.
-    const videoOnlyArgs = [
-      ...inputs,
-      "-filter_complex", videoOnlyFilterGraph,
-      "-map", "[edited]",
-      "-an",
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "27",
-      "-maxrate", "4M",
-      "-bufsize", "8M",
-      "-pix_fmt", "yuv420p",
-      "-movflags", "+faststart",
-      "final-reel.mp4",
-    ];
-    try {
-      await engine.exec(videoOnlyArgs);
-    } catch {
-      const fallbackArgs = videoOnlyArgs.slice();
-      const codecIndex = fallbackArgs.indexOf("libx264");
-      if (codecIndex >= 0) fallbackArgs[codecIndex] = "mpeg4";
-      fallbackArgs.splice(fallbackArgs.indexOf("-crf"), 2, "-q:v", "6");
-      await engine.exec(fallbackArgs);
-    }
+    const fallbackArgs = encodeArgs.slice();
+    const codecIndex = fallbackArgs.indexOf("libx264");
+    if (codecIndex >= 0) fallbackArgs[codecIndex] = "mpeg4";
+    fallbackArgs.splice(fallbackArgs.indexOf("-crf"), 2, "-q:v", "6");
+    await engine.exec(fallbackArgs);
   }
 
   onProgress({ progress: 96, currentStep: "Polishing the final editorial cut for download…" });
