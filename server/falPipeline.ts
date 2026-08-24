@@ -2,6 +2,7 @@ import { fal } from "@fal-ai/client";
 import type { VideoProject } from "../drizzle/schema";
 import {
   FAL_CLIP_SECONDS,
+  FAL_GENERATE_AUDIO,
   FAL_IMAGE_TO_VIDEO_MODEL,
   FAL_VISION_LLM_MODEL,
   FAL_VISION_PROMPT_MODEL,
@@ -29,6 +30,7 @@ const CINEMATIC_LOCK = [
   "The camera should feel as if it is operated on a stabilized professional gimbal at eye level, with gentle acceleration and deceleration, no abrupt changes, and no presentation-style slideshow motion.",
   "Use a rectilinear 24–35mm architectural-lens look with straight verticals; no handheld shake, snap zoom, whip pan, time lapse, orbiting spin, or exaggerated lens distortion.",
   "Animate only believable environmental motion such as a gentle change in daylight, water shimmer, curtain movement, foliage movement, or controlled specular highlights when supported by the image.",
+  "If native audio is generated, keep it subtle and natural to the visible scene, such as water, breeze, room tone, fabric, or soft architectural ambience. Do not add voices, dialogue, sound effects, or music.",
   "Do not change the room, add or remove furniture, move walls, invent doors or windows, alter the view, or introduce people, animals, text, logos, or watermarks.",
 ].join(" ");
 
@@ -162,7 +164,7 @@ async function submitVideoJobs(client: typeof fal, signedImages: string[], promp
       prompt: prompts[index],
       start_image_url: imageUrl,
       duration: String(FAL_CLIP_SECONDS) as "10",
-      generate_audio: false,
+      generate_audio: FAL_GENERATE_AUDIO,
       negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, generic left-to-right pan, slideshow motion, artificial light bloom, blur, distort, low quality, people, animals, text, logo, watermark",
       cfg_scale: 0.5,
     },

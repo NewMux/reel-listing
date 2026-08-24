@@ -5,6 +5,7 @@ export const FAL_IMAGE_TO_VIDEO_MODEL = "fal-ai/kling-video/v3/pro/image-to-vide
 export const FAL_VISION_PROMPT_MODEL = "openrouter/router/vision";
 export const FAL_VISION_LLM_MODEL = "google/gemini-2.5-flash";
 export const FAL_CLIP_SECONDS = 10;
+export const FAL_GENERATE_AUDIO = true;
 
 export type ProjectStatus = (typeof projectStatuses)[number];
 
