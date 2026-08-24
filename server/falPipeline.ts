@@ -15,7 +15,7 @@ const VISION_SYSTEM_PROMPT = [
   "You are the shot designer for a premium architectural real-estate film.",
   "Analyze only the attached property photo and return one JSON object with exactly these string keys: shotType, cameraMove, lighting, focus.",
   "shotType must be one of: outdoor-view, living-room, kitchen-dining, bedroom, bathroom, detail, unknown.",
-  "cameraMove must describe one restrained, physically plausible five-second move using a stabilized dolly, slider, or gentle arc.",
+  "cameraMove must describe one restrained, physically plausible ten-second move using a stabilized gimbal, dolly, slider, or gentle arc.",
   "lighting must describe only light behavior visible or safely implied by the reference image.",
   "focus must name one visible architectural or lifestyle feature without inventing anything.",
   "Never claim a room or object that is not clearly visible. If uncertain, use unknown and neutral language.",
@@ -24,10 +24,11 @@ const VISION_SYSTEM_PROMPT = [
 
 const CINEMATIC_LOCK = [
   "Use the supplied image as the exact first frame and preserve its room, architecture, furniture, finishes, windows, landscaping, horizon, and proportions.",
-  "Create a premium architectural property-film shot: restrained luxury, natural perspective, stabilized camera, subtle depth and parallax, realistic exposure, and elegant editorial pacing.",
-  "Begin with a brief settled hold, execute one continuous intentional camera move, then ease into a clean final hold within five seconds.",
-  "Use a rectilinear 24–35mm architectural-lens look with straight verticals; no handheld shake, snap zoom, whip pan, time lapse, or exaggerated lens distortion.",
-  "Animate only believable environmental motion such as a gentle change in daylight, water shimmer, curtain movement, or controlled specular highlights when supported by the image.",
+  "Create a premium editorial property-film shot with a natural architectural perspective, restrained luxury, realistic exposure, subtle depth, and believable parallax.",
+  "Use one continuous ten-second gimbal-like camera move: begin with a one-second settled hold, ease into a slow deliberate push or arc, maintain smooth momentum through the middle, and finish with a two-second composed hold.",
+  "The camera should feel as if it is operated on a stabilized professional gimbal at eye level, with gentle acceleration and deceleration, no abrupt changes, and no presentation-style slideshow motion.",
+  "Use a rectilinear 24–35mm architectural-lens look with straight verticals; no handheld shake, snap zoom, whip pan, time lapse, orbiting spin, or exaggerated lens distortion.",
+  "Animate only believable environmental motion such as a gentle change in daylight, water shimmer, curtain movement, foliage movement, or controlled specular highlights when supported by the image.",
   "Do not change the room, add or remove furniture, move walls, invent doors or windows, alter the view, or introduce people, animals, text, logos, or watermarks.",
 ].join(" ");
 
@@ -66,8 +67,8 @@ function buildCinematicPrompt(index: number, direction: { shotType: string; came
     `Camera choreography: ${direction.cameraMove}.`,
     `Light behavior: ${direction.lighting}.`,
     `Visual focus: ${direction.focus}.`,
-    `This is shot ${index + 1} in a five-second property sequence for ${propertyContext(project)}.`,
-    "Generate a premium architectural image-to-video shot with Kling 3 Pro. Favor filmic movement, clear shot intention, realistic spatial depth, and continuity over generic lateral panning.",
+    `This is shot ${index + 1} in a ${project.mediaUrls.length}-shot property film for ${propertyContext(project)}.`,
+    "Generate a premium architectural image-to-video shot with Kling 3 Pro. Favor a smooth gimbal-like move, clear shot intention, realistic spatial depth, and continuity over generic lateral panning.",
   ].join(" ");
 }
 
@@ -90,20 +91,18 @@ function propertyContext(project: VideoProject) {
 }
 
 function fallbackPrompt(index: number, project: VideoProject) {
-  const movements = [
-    "slow cinematic push-in",
-    "gentle left-to-right camera drift",
-    "measured upward reveal",
-    "subtle parallax movement",
-  ];
-  return `Create a refined real-estate property video from this still image. Use a ${movements[index % movements.length]}, natural light, stable architecture, realistic materials, premium editorial property-film style, no people, no text, no logos, no warping. Property context: ${propertyContext(project)}. Keep the structure, room layout, furniture, and finishes faithful to the reference image.`;
+  return [
+    CINEMATIC_LOCK,
+    `This is fallback shot ${index + 1} in a ${project.mediaUrls.length}-shot property film for ${propertyContext(project)}.`,
+    "Use a smooth eye-level gimbal push or gentle arc selected to suit the visible composition, with realistic parallax and a composed editorial finish.",
+  ].join(" ");
 }
 
 function promptInstruction(index: number, project: VideoProject) {
   return [
-    `This is property photo ${index + 1} of a five-photo listing sequence.`,
+    `This is property photo ${index + 1} of a ${project.mediaUrls.length}-photo listing sequence.`,
     `Listing context: ${propertyContext(project)}.`,
-    "Analyze the attached image and return the requested JSON shot design.",
+    "Analyze the attached image and return the requested JSON shot design. The final clip will be ten seconds long.",
     "Use only visible evidence. The shot design must prioritize exact-image preservation over decorative description.",
   ].join(" ");
 }
@@ -162,9 +161,9 @@ async function submitVideoJobs(client: typeof fal, signedImages: string[], promp
     input: {
       prompt: prompts[index],
       start_image_url: imageUrl,
-      duration: String(FAL_CLIP_SECONDS) as "5",
+      duration: String(FAL_CLIP_SECONDS) as "10",
       generate_audio: false,
-      negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, artificial light bloom, blur, distort, low quality, people, animals, text, logo, watermark",
+      negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, generic left-to-right pan, slideshow motion, artificial light bloom, blur, distort, low quality, people, animals, text, logo, watermark",
       cfg_scale: 0.5,
     },
   })));

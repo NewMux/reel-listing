@@ -123,7 +123,7 @@ export default function NewProject() {
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#D8E9B2] text-[#436515]"><ImagePlus size={17} /></span>
                 <div>
                   <p className="text-sm font-bold text-[#31503B]">{locale === "en" ? "Up to ten frames, one clear story" : "حتى عشر لقطات، قصة واضحة واحدة"}</p>
-                  <p className="mt-2 text-sm leading-6 text-[#6B7C70]">{locale === "en" ? "We turn each photo into a cinematic 5-second segment, then stitch every segment into one polished reel." : "نحوّل كل صورة إلى مقطع سينمائي مدته 5 ثوانٍ، ثم نرتّب جميع المقاطع في فيلم واحد راقٍ."}</p>
+                  <p className="mt-2 text-sm leading-6 text-[#6B7C70]">{locale === "en" ? "We turn each photo into a cinematic 10-second segment, then stitch every segment into one polished reel." : "نحوّل كل صورة إلى مقطع سينمائي مدته 10 ثوانٍ، ثم نرتّب جميع المقاطع في فيلم واحد راقٍ."}</p>
                 </div>
               </div>
               <div className="mt-5 flex items-center gap-2 text-xs font-bold text-[#52712F]">
