@@ -16,12 +16,29 @@ const VISION_SYSTEM_PROMPT = [
   "You are the shot designer for a premium architectural real-estate film.",
   "Analyze only the attached property photo and return one JSON object with exactly these string keys: shotType, cameraMove, lighting, focus.",
   "shotType must be one of: outdoor-view, living-room, kitchen-dining, bedroom, bathroom, detail, unknown.",
-  "cameraMove must describe one restrained, physically plausible ten-second move using a stabilized gimbal, dolly, slider, or gentle arc.",
+  "cameraMove must describe one restrained, physically plausible ten-second move using a stabilized gimbal, dolly, slider, or gentle arc, and must follow the required movement assignment in the user prompt.",
   "lighting must describe only light behavior visible or safely implied by the reference image.",
   "focus must name one visible architectural or lifestyle feature without inventing anything.",
   "Never claim a room or object that is not clearly visible. If uncertain, use unknown and neutral language.",
   "Return JSON only. No markdown, title, explanation, or extra keys.",
 ].join(" ");
+
+const MOVEMENT_DIRECTIVES = [
+  "a forward gimbal push toward the strongest depth line",
+  "a smooth lateral gimbal track that creates clear foreground-to-background parallax",
+  "a measured diagonal gimbal move that travels across the room’s main perspective",
+  "a gentle gimbal arc around the dominant architectural feature while keeping verticals straight",
+  "a controlled rising gimbal reveal that opens the upper volume without changing the room",
+  "a slow backward gimbal pull that reveals more context while preserving the exact composition",
+  "a precise side-to-side gimbal glide past the nearest visible foreground edge",
+  "a calm corner-to-corner gimbal travel that follows the strongest sightline",
+  "a subtle forward-and-lateral gimbal drift toward the brightest visible opening",
+  "a restrained descending gimbal move that settles attention on the most important material detail",
+] as const;
+
+function movementDirective(index: number) {
+  return MOVEMENT_DIRECTIVES[index % MOVEMENT_DIRECTIVES.length];
+}
 
 const CINEMATIC_LOCK = [
   "Use the supplied image as the exact first frame and preserve its room, architecture, furniture, finishes, windows, landscaping, horizon, and proportions.",
@@ -53,11 +70,16 @@ function normalizeShotType(value: unknown) {
 
 function fallbackDirection(index: number) {
   const directions = [
-    { shotType: "outdoor-view", cameraMove: "a slow forward dolly with a barely perceptible arc that reveals depth toward the horizon", lighting: "sunlight remains natural and stable while highlights on the water or glass shimmer subtly", focus: "the strongest view and the relationship between the terrace edge and the horizon" },
-    { shotType: "living-room", cameraMove: "a slow stabilized slider move that glides laterally past the nearest foreground detail toward the room beyond", lighting: "soft daylight falls naturally through the glazing with gentle shadow continuity", focus: "the room’s main seating composition and its strongest architectural sightline" },
-    { shotType: "kitchen-dining", cameraMove: "a measured diagonal push-in that reveals the depth from the kitchen work plane toward the dining composition", lighting: "warm practical light and ambient daylight remain balanced without changing the room’s exposure", focus: "the material contrast, joinery, and connection between kitchen and dining areas" },
-    { shotType: "bedroom", cameraMove: "a quiet lateral dolly toward the brightest opening, maintaining a calm eye-level perspective", lighting: "natural light gently shifts across the floor and fabric while the room remains evenly exposed", focus: "the bed, primary wall, and the room’s sense of calm and openness" },
-    { shotType: "bathroom", cameraMove: "a slow precise dolly along the vanity line with a subtle foreground-to-background parallax", lighting: "warm architectural lighting creates restrained specular movement across the stone and metal finishes", focus: "the vanity, mirrors, and premium material details" },
+    { shotType: "outdoor-view", cameraMove: MOVEMENT_DIRECTIVES[0], lighting: "sunlight remains natural and stable while highlights on the water or glass shimmer subtly", focus: "the strongest view and the relationship between the terrace edge and the horizon" },
+    { shotType: "living-room", cameraMove: MOVEMENT_DIRECTIVES[1], lighting: "soft daylight falls naturally through the glazing with gentle shadow continuity", focus: "the room’s main seating composition and its strongest architectural sightline" },
+    { shotType: "kitchen-dining", cameraMove: MOVEMENT_DIRECTIVES[2], lighting: "warm practical light and ambient daylight remain balanced without changing the room’s exposure", focus: "the material contrast, joinery, and connection between kitchen and dining areas" },
+    { shotType: "bedroom", cameraMove: MOVEMENT_DIRECTIVES[3], lighting: "natural light gently shifts across the floor and fabric while the room remains evenly exposed", focus: "the bed, primary wall, and the room’s sense of calm and openness" },
+    { shotType: "bathroom", cameraMove: MOVEMENT_DIRECTIVES[4], lighting: "warm architectural lighting creates restrained specular movement across the stone and metal finishes", focus: "the vanity, mirrors, and premium material details" },
+    { shotType: "detail", cameraMove: MOVEMENT_DIRECTIVES[5], lighting: "the visible light remains stable with gentle tonal continuity", focus: "the strongest visible finish or architectural detail" },
+    { shotType: "living-room", cameraMove: MOVEMENT_DIRECTIVES[6], lighting: "soft daylight remains consistent across the visible surfaces", focus: "the nearest visible material and its relationship to the room" },
+    { shotType: "kitchen-dining", cameraMove: MOVEMENT_DIRECTIVES[7], lighting: "ambient daylight and practical light remain balanced and unchanged", focus: "the strongest visible sightline through the space" },
+    { shotType: "outdoor-view", cameraMove: MOVEMENT_DIRECTIVES[8], lighting: "the natural exterior light remains stable with restrained highlight movement", focus: "the brightest opening and the view beyond it" },
+    { shotType: "detail", cameraMove: MOVEMENT_DIRECTIVES[9], lighting: "the visible light remains stable across the material surface", focus: "the most important visible material detail" },
   ];
   return directions[index % directions.length];
 }
@@ -67,6 +89,7 @@ function buildCinematicPrompt(index: number, direction: { shotType: string; came
     CINEMATIC_LOCK,
     `Shot type: ${direction.shotType}.`,
     `Camera choreography: ${direction.cameraMove}.`,
+    `Required movement variation for this shot: ${movementDirective(index)}. Use this movement family and do not repeat a generic lateral pan.`,
     `Light behavior: ${direction.lighting}.`,
     `Visual focus: ${direction.focus}.`,
     `This is shot ${index + 1} in a ${project.mediaUrls.length}-shot property film for ${propertyContext(project)}.`,
@@ -104,6 +127,7 @@ function promptInstruction(index: number, project: VideoProject) {
   return [
     `This is property photo ${index + 1} of a ${project.mediaUrls.length}-photo listing sequence.`,
     `Listing context: ${propertyContext(project)}.`,
+    `Required movement assignment: ${movementDirective(index)}. Return a cameraMove that follows this assignment without adding a second movement or a visual step sequence.`,
     "Analyze the attached image and return the requested JSON shot design. The final clip will be ten seconds long.",
     "Use only visible evidence. The shot design must prioritize exact-image preservation over decorative description.",
   ].join(" ");
