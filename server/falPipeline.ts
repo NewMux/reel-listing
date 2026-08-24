@@ -26,8 +26,8 @@ const VISION_SYSTEM_PROMPT = [
 const CINEMATIC_LOCK = [
   "Use the supplied image as the exact first frame and preserve its room, architecture, furniture, finishes, windows, landscaping, horizon, and proportions.",
   "Create a premium editorial property-film shot with a natural architectural perspective, restrained luxury, realistic exposure, subtle depth, and believable parallax.",
-  "Use one continuous ten-second gimbal-like camera move: begin with a one-second settled hold, ease into a slow deliberate push or arc, maintain smooth momentum through the middle, and finish with a two-second composed hold.",
-  "The camera should feel as if it is operated on a stabilized professional gimbal at eye level, with gentle acceleration and deceleration, no abrupt changes, and no presentation-style slideshow motion.",
+  "Use one continuous ten-second gimbal-like camera move that starts immediately on the first frame, with visible forward, lateral, or arcing travel selected to suit the composition, sustained parallax through the middle, and natural motion through the final frame.",
+  "The camera should feel as if it is operated on a stabilized professional gimbal at eye level, with purposeful movement from start to finish, smooth acceleration and deceleration, no static opening or closing hold, no abrupt changes, and no presentation-style slideshow motion.",
   "Use a rectilinear 24–35mm architectural-lens look with straight verticals; no handheld shake, snap zoom, whip pan, time lapse, orbiting spin, or exaggerated lens distortion.",
   "Animate only believable environmental motion such as a gentle change in daylight, water shimmer, curtain movement, foliage movement, or controlled specular highlights when supported by the image.",
   "If native audio is generated, keep it subtle and natural to the visible scene, such as water, breeze, room tone, fabric, or soft architectural ambience. Do not add voices, dialogue, sound effects, or music.",
