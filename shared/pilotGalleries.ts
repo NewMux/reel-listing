@@ -7,7 +7,7 @@ export type PilotGalleryImage = {
   url: string;
 };
 
-/** Owner-provided pilot assets. The apartment set is awaiting one final image. */
+/** Owner-provided pilot assets for the private apartment and villa pilot galleries. */
 export const pilotGalleries: Record<PilotGalleryId, PilotGalleryImage[]> = {
   apartment: [
     { id: "apartment-01", name: "Apartment 01", url: "https://files.manuscdn.com/user_upload_by_module/session_file/310519663888332219/SQaFKhenBnrzpoBH.png" },

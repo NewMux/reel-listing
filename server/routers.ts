@@ -111,7 +111,7 @@ export const appRouter = router({
     createPilot: protectedProcedure
       .input(z.object({
         gallery: z.enum(pilotGalleryIds),
-        imageIds: z.array(z.string().min(1).max(80)).length(MAX_PROPERTY_PHOTOS),
+        imageIds: z.array(z.string().min(1).max(80)).min(1).max(MAX_PROPERTY_PHOTOS),
         title: z.string().trim().min(2).max(160),
         description: z.string().trim().max(1_000).optional(),
         location: z.string().trim().min(2).max(180),
@@ -119,8 +119,8 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const gallery = getPilotGallery(input.gallery);
         const selected = input.imageIds.map(id => gallery.find(image => image.id === id));
-        if (gallery.length !== MAX_PROPERTY_PHOTOS || selected.some(image => !image) || new Set(input.imageIds).size !== input.imageIds.length) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Choose exactly 10 owner-provided photos from this pilot gallery." });
+        if (gallery.length === 0 || input.imageIds.length !== gallery.length || selected.some(image => !image) || new Set(input.imageIds).size !== input.imageIds.length) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Choose all owner-provided photos from this pilot gallery." });
         }
         const images = selected.filter((image): image is NonNullable<typeof image> => Boolean(image));
         const id = await createVideoProject({

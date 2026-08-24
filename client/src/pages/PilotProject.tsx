@@ -6,25 +6,23 @@ import { trpc } from "@/lib/trpc";
 import { copy, useLocale } from "@/lib/locale";
 import { getPilotGallery, type PilotGalleryId } from "@shared/pilotGalleries";
 
-const REQUIRED_SELECTED = 10;
-
 type PilotLocale = "en" | "ar";
 
 const pilotCopy = {
   en: {
     eyebrow: "Private pilot gallery",
-    title: "Choose the ten frames that make the film.",
+    title: "Choose the frames that make the film.",
     body: "These are owner-provided property galleries. Testers do not upload photos; they choose the ten strongest frames, set the order, and generate the film.",
     apartment: "Apartment",
     villa: "Villa",
     ownerGallery: "Owner-provided gallery",
-    galleryBody: "Choose one property type, then select exactly 10 photos from the preloaded set.",
+    galleryBody: "Choose one property type, then select all photos in that owner-provided set.",
     selected: "selected",
-    selectExact: "Select exactly 10 photos",
-    selectedOnly: "Only your selected 10 will be sent to AI generation",
+    selectExact: "Select all available photos for this film",
+    selectedOnly: "Only your selected photos will be sent to AI generation",
     sequenceTitle: "Your film sequence",
     sequenceBody: "This order becomes the edit order. Move selected shots up or down before creating the project.",
-    emptySequence: "Select ten photos above to build the film sequence.",
+    emptySequence: "Select the owner-provided photos above to build the film sequence.",
     details: "Test property details",
     propertyTitle: "Property title",
     propertyTitlePlace: "e.g. Dubai villa pilot",
@@ -32,31 +30,31 @@ const pilotCopy = {
     locationPlace: "Dubai, UAE",
     description: "Optional listing note",
     descriptionPlace: "A short brief to anchor the story…",
-    create: "Create film from selected 10",
+    create: "Create film from selected photos",
     processing: "Preparing the selected gallery…",
     back: "Back to dashboard",
-    required: "Select exactly 10 photos before continuing.",
+    required: "Select all owner-provided photos before continuing.",
     detailsRequired: "Add a property title and location to continue.",
-    notReady: "This gallery currently has fewer than 10 owner-provided photos. The owner must finish the set before it can be generated.",
+    notReady: "This owner gallery has no photos available yet.",
     order: "Film order",
     number: "Photo",
-    apartmentLoaded: "9 of 10 loaded",
-    villaLoaded: "10 of 10 loaded",
+    apartmentLoaded: "9 photos loaded",
+    villaLoaded: "10 photos loaded",
   },
   ar: {
     eyebrow: "معرض تجريبي خاص",
-    title: "اختر اللقطات العشر التي تصنع الفيلم.",
+    title: "اختر اللقطات التي تصنع الفيلم.",
     body: "هذه معارض عقارية أضافها المالك. لا يرفع المختبرون صوراً؛ بل يختارون أقوى عشر لقطات، ويحددون ترتيبها، ثم ينشئون الفيلم.",
     apartment: "شقة",
     villa: "فيلا",
     ownerGallery: "معرض أضافه المالك",
-    galleryBody: "اختر نوع العقار، ثم حدد 10 صور بالضبط من المجموعة الجاهزة.",
+    galleryBody: "اختر نوع العقار، ثم حدد جميع الصور من مجموعة المالك الجاهزة.",
     selected: "مختارة",
-    selectExact: "اختر 10 صور بالضبط",
-    selectedOnly: "سيتم إرسال الصور العشر المختارة فقط إلى التوليد بالذكاء الاصطناعي",
+    selectExact: "اختر جميع الصور المتاحة لهذا الفيلم",
+    selectedOnly: "سيتم إرسال الصور المختارة فقط إلى التوليد بالذكاء الاصطناعي",
     sequenceTitle: "تسلسل الفيلم",
     sequenceBody: "يصبح هذا الترتيب ترتيب المونتاج. حرّك اللقطات إلى الأعلى أو الأسفل قبل إنشاء المشروع.",
-    emptySequence: "اختر عشر صور أعلاه لبناء تسلسل الفيلم.",
+    emptySequence: "اختر الصور التي أضافها المالك أعلاه لبناء تسلسل الفيلم.",
     details: "تفاصيل العقار التجريبي",
     propertyTitle: "عنوان العقار",
     propertyTitlePlace: "مثال: تجربة فيلا في دبي",
@@ -64,16 +62,16 @@ const pilotCopy = {
     locationPlace: "دبي، الإمارات",
     description: "ملاحظة اختيارية للعرض",
     descriptionPlace: "موجز قصير لتثبيت القصة…",
-    create: "إنشاء الفيلم من الصور العشر المختارة",
+    create: "إنشاء الفيلم من الصور المختارة",
     processing: "جارٍ إعداد المعرض المختار…",
     back: "العودة إلى لوحة التحكم",
-    required: "اختر 10 صور بالضبط قبل المتابعة.",
+    required: "اختر جميع الصور التي أضافها المالك قبل المتابعة.",
     detailsRequired: "أضف عنوان العقار والموقع للمتابعة.",
-    notReady: "يحتوي هذا المعرض حالياً على أقل من 10 صور أضافها المالك. يجب إكمال المجموعة قبل إمكانية التوليد.",
+    notReady: "لا توجد صور متاحة في معرض المالك بعد.",
     order: "ترتيب الفيلم",
     number: "الصورة",
-    apartmentLoaded: "تم تحميل 9 من 10",
-    villaLoaded: "تم تحميل 10 من 10",
+    apartmentLoaded: "تم تحميل 9 صور",
+    villaLoaded: "تم تحميل 10 صور",
   },
 } as const;
 
@@ -93,9 +91,10 @@ export default function PilotProject() {
   });
 
   const galleryImages = getPilotGallery(gallery);
+  const selectionTarget = galleryImages.length;
   const selectedPhotos = useMemo(() => selectedIds.map(id => galleryImages.find(image => image.id === id)).filter(Boolean), [galleryImages, selectedIds]);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const galleryReady = galleryImages.length === REQUIRED_SELECTED;
+  const galleryReady = galleryImages.length > 0;
 
   const switchGallery = (next: PilotGalleryId) => {
     setGallery(next);
@@ -107,8 +106,8 @@ export default function PilotProject() {
     setError("");
     setSelectedIds(current => {
       if (current.includes(id)) return current.filter(item => item !== id);
-      if (current.length >= REQUIRED_SELECTED) {
-        setError(locale === "en" ? "You already selected 10 photos. Deselect one to choose another." : "لقد اخترت 10 صور بالفعل. ألغِ تحديد صورة لاختيار أخرى.");
+      if (current.length >= selectionTarget) {
+        setError(locale === "en" ? "You already selected all available photos." : "لقد اخترت جميع الصور المتاحة بالفعل.");
         return current;
       }
       return [...current, id];
@@ -128,7 +127,7 @@ export default function PilotProject() {
   const submit = () => {
     setError("");
     if (!galleryReady) return setError(t.notReady);
-    if (selectedIds.length !== REQUIRED_SELECTED) return setError(t.required);
+    if (selectedIds.length !== selectionTarget) return setError(t.required);
     if (!title.trim() || !location.trim()) return setError(t.detailsRequired);
     create.mutate({
       gallery,
@@ -153,7 +152,7 @@ export default function PilotProject() {
             <p className="mt-5 max-w-[500px] text-sm leading-7 text-[#63746A]">{t.body}</p>
             <div className="mt-8 rounded-[22px] border border-[#C6D4A9] bg-[#EAF0DC] p-5">
               <div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#D8E9B2] text-[#436515]"><Sparkles size={17} /></span><div><p className="text-sm font-bold text-[#31503B]">{t.selectedOnly}</p><p className="mt-2 text-sm leading-6 text-[#6B7C70]">{t.sequenceBody}</p></div></div>
-              <div className="mt-5 flex items-center gap-2 border-t border-[#BFD19C] pt-4 text-xs font-bold text-[#52712F]"><Check size={15} />{selectedIds.length}/{REQUIRED_SELECTED} {t.selected}</div>
+              <div className="mt-5 flex items-center gap-2 border-t border-[#BFD19C] pt-4 text-xs font-bold text-[#52712F]"><Check size={15} />{selectedIds.length}/{selectionTarget} {t.selected}</div>
             </div>
           </div>
 
@@ -167,7 +166,7 @@ export default function PilotProject() {
               {(["apartment", "villa"] as const).map(id => <button type="button" key={id} onClick={() => switchGallery(id)} className={`rounded-lg px-3 py-3 text-sm font-bold transition ${gallery === id ? "bg-white text-[#11251E] shadow-sm" : "text-[#68766E] hover:text-[#11251E]"}`}>{id === "apartment" ? t.apartment : t.villa}</button>)}
             </div>
 
-            <p className="mt-5 text-xs font-bold uppercase tracking-[.1em] text-[#6E8249]">{t.selectExact}</p>
+            <p className="mt-5 text-xs font-bold uppercase tracking-[.1em] text-[#6E8249]">{t.selectExact} · {selectedIds.length}/{selectionTarget} {t.selected}</p>
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-5">
               {galleryImages.map((image, index) => {
                 const rank = selectedIds.indexOf(image.id);
@@ -186,7 +185,7 @@ export default function PilotProject() {
             {!galleryReady && <p className="mt-4 flex gap-2 rounded-xl bg-[#FFF0D0] px-3 py-2.5 text-xs font-medium leading-5 text-[#8B5A08]"><AlertCircle size={15} className="shrink-0" />{t.notReady}</p>}
 
             <div className="mt-7 rounded-2xl border border-[#11251E]/8 bg-[#F8F8F3] p-4">
-              <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.1em] text-[#6E8249]">{t.sequenceTitle}</p><p className="mt-1 text-xs leading-5 text-[#758178]">{t.sequenceBody}</p></div><span className="shrink-0 rounded-full bg-[#D8E9B2] px-2.5 py-1 text-[10px] font-bold text-[#416221]">{selectedIds.length}/{REQUIRED_SELECTED}</span></div>
+              <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.1em] text-[#6E8249]">{t.sequenceTitle}</p><p className="mt-1 text-xs leading-5 text-[#758178]">{t.sequenceBody}</p></div><span className="shrink-0 rounded-full bg-[#D8E9B2] px-2.5 py-1 text-[10px] font-bold text-[#416221]">{selectedIds.length}/{selectionTarget}</span></div>
               {selectedPhotos.length === 0 ? <p className="mt-4 rounded-xl bg-white px-3 py-4 text-center text-xs font-semibold text-[#89948B]">{t.emptySequence}</p> : <div className="mt-4 grid gap-2 sm:grid-cols-2">
                 {selectedPhotos.map((photo, index) => photo && <div key={photo.id} className="flex items-center gap-2 rounded-xl bg-white p-2"><img src={photo.url} alt={`${t.number} ${index + 1}`} className="h-12 w-16 shrink-0 rounded-lg object-cover" /><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#D8E9B2] text-[10px] font-bold text-[#4A6B2A]">{index + 1}</span><span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#446052]">{photo.name}</span><div className="flex shrink-0 gap-1"><button type="button" disabled={index === 0} onClick={() => moveSelected(index, -1)} className="grid h-7 w-7 place-items-center rounded-lg border border-[#11251E]/10 text-[#557060] disabled:opacity-25" aria-label={`${t.order} ${index + 1} up`}><ArrowUp size={13} /></button><button type="button" disabled={index === selectedPhotos.length - 1} onClick={() => moveSelected(index, 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-[#11251E]/10 text-[#557060] disabled:opacity-25" aria-label={`${t.order} ${index + 1} down`}><ArrowDown size={13} /></button></div></div>)}
               </div>}
