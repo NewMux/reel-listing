@@ -49,7 +49,8 @@ async function authenticateSupabaseRequest(req: CreateExpressContextOptions["req
       loginMethod: "supabase",
     });
     return { user: (await getUserByOpenId(openId)) ?? null, accessToken: token };
-  } catch {
+  } catch (error) {
+    console.error("[Auth] Supabase user sync failed:", error);
     return { user: null, accessToken: null };
   }
 }

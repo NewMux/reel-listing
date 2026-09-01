@@ -12,7 +12,7 @@ const LocaleContext = createContext<LocaleContextValue | undefined>(undefined);
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocale] = useState<Locale>(() => {
-    const saved = localStorage.getItem("vistaflow-locale");
+    const saved = localStorage.getItem("reel-listing-locale");
     return saved === "ar" || saved === "en" ? saved : navigator.language.startsWith("ar") ? "ar" : "en";
   });
 
@@ -20,7 +20,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     const isRtl = locale === "ar";
     document.documentElement.lang = locale;
     document.documentElement.dir = isRtl ? "rtl" : "ltr";
-    localStorage.setItem("vistaflow-locale", locale);
+    localStorage.setItem("reel-listing-locale", locale);
   }, [locale]);
 
   const value = useMemo(() => ({ locale, setLocale, isRtl: locale === "ar" }), [locale]);
@@ -53,10 +53,10 @@ export const copy = {
       ctaTitle: "Let the property speak for itself.", ctaBody: "A considered way to create elevated property video while keeping your team moving.", ctaButton: "Start a project",
     },
     pricing: { eyebrow: "Clear by design", title: "Plans for the way you work.", body: "Choose a starting point for your listing portfolio. Scale when your production volume grows.", monthly: "Monthly", annually: "Annual", save: "Save 17%", choose: "Choose plan", compare: "Compare every detail", perMonth: "/ month", plans: [
-      ["Starter", "$39", "For focused launches", "4 video projects each month", "Standard generation", "Branded delivery", "Email support"],
-      ["Pro", "$99", "For agents with regular volume", "12 video projects each month", "Priority generation", "3 virtual staging credits", "Priority support"],
-      ["Agency", "$249", "For growing property teams", "20 video projects each month", "Team workspace", "Extra projects at $9", "Dedicated success support"],
-    ], comparison: ["Video projects / month", "Virtual staging credits", "Team members", "Priority support"] },
+      ["Starter", "$89", "For focused launches", "3 video projects each month", "Standard generation", "Branded delivery", "Email support"],
+      ["Pro", "$229", "For agents with regular volume", "8 video projects each month", "Priority generation", "Priority support"],
+      ["Agency", "$499", "For growing property teams", "20 video projects each month", "Team workspace", "Extra projects at $29", "Dedicated success support"],
+    ], comparison: ["Video projects / month", "Team members", "Priority support"] },
     legal: { termsTitle: "Terms of Service", privacyTitle: "Privacy Policy", updated: "Last updated: August 2026", termsIntro: "These terms describe the agreement for using reel-listing.com. By creating an account or submitting property media, you agree to use the platform lawfully and to provide content that you have the right to use.", privacyIntro: "This policy explains how reel-listing.com handles account information, project details, and media submitted through the platform. We use this information to provide the service, protect the workspace, and improve the product." },
     dashboard: { greeting: "Good to see you", title: "Your projects", body: "Create, review, and deliver listing films from one calm workspace.", newProject: "New project", emptyTitle: "Your next listing deserves a closer look.", emptyBody: "Start with the owner-provided pilot gallery. Choose the strongest images, review the direction, and approve production.", emptyAction: "Start a project", statuses: "Project stages", view: "View project", recent: "Recently updated" },
     upload: { eyebrow: "New project", title: "Set the scene.", body: "Add property imagery and the short brief your project needs.", media: "Property photos", mediaHint: "Upload 1 to 10 property photos. JPG, PNG, or WEBP. Up to 25 MB combined.", photoCount: "photos selected", photoCountReady: "Ready for review", photoCountRemaining: "more to go", drop: "Drop your media here", browse: "or browse files", titleField: "Property title", titlePlace: "e.g. Seafront penthouse in Palm Jumeirah", description: "Listing description", descriptionPlace: "A few details to anchor the story…", location: "Location", locationPlace: "Dubai Marina, Dubai", continue: "Create project", processing: "Preparing your project…", remove: "Remove" },
@@ -82,7 +82,7 @@ export const copy = {
       flowEyebrow: "من الاختيار إلى التسليم", flowTitle: "طريق واضح من صور العقار إلى فيلم مكتمل.", steps: ["اختر صور العقار", "أضف تفاصيل العرض", "راجع الاتجاه البصري", "حمّل فيلمك"],
       ctaTitle: "دع العقار يتحدث عن نفسه.", ctaBody: "طريقة مدروسة لإنتاج فيديو عقاري متميز مع الحفاظ على سرعة فريقك.", ctaButton: "ابدأ مشروعاً",
     },
-    pricing: { eyebrow: "وضوح في كل التفاصيل", title: "خطط تناسب طريقة عملك.", body: "اختر نقطة البداية المناسبة لمحفظتك العقارية، ثم ارتقِ عندما يتوسع حجم الإنتاج.", monthly: "شهري", annually: "سنوي", save: "وفّر 17%", choose: "اختر الخطة", compare: "قارن كل التفاصيل", perMonth: "/ شهرياً", plans: [["Starter", "$39", "لإطلاقات مركزة", "4 مشاريع فيديو شهرياً", "توليد أساسي", "تسليم بعلامتك", "دعم عبر البريد"], ["Pro", "$99", "للوكلاء ذوي الإنتاج المنتظم", "12 مشروع فيديو شهرياً", "توليد بأولوية", "3 أرصدة للتجهيز الافتراضي", "دعم بأولوية"], ["Agency", "$249", "لفرق العقارات المتنامية", "20 مشروع فيديو شهرياً", "مساحة عمل للفريق", "المشاريع الإضافية بـ$9", "دعم نجاح مخصص"]], comparison: ["مشاريع الفيديو / شهر", "أرصدة التجهيز الافتراضي", "أعضاء الفريق", "دعم بأولوية"] },
+    pricing: { eyebrow: "وضوح في كل التفاصيل", title: "خطط تناسب طريقة عملك.", body: "اختر نقطة البداية المناسبة لمحفظتك العقارية، ثم ارتقِ عندما يتوسع حجم الإنتاج.", monthly: "شهري", annually: "سنوي", save: "وفّر 17%", choose: "اختر الخطة", compare: "قارن كل التفاصيل", perMonth: "/ شهرياً", plans: [["Starter", "$89", "لإطلاقات مركزة", "3 مشاريع فيديو شهرياً", "توليد أساسي", "تسليم بعلامتك", "دعم عبر البريد"], ["Pro", "$229", "للوكلاء ذوي الإنتاج المنتظم", "8 مشاريع فيديو شهرياً", "توليد بأولوية", "دعم بأولوية"], ["Agency", "$499", "لفرق العقارات المتنامية", "20 مشروع فيديو شهرياً", "مساحة عمل للفريق", "المشاريع الإضافية بـ$29", "دعم نجاح مخصص"]], comparison: ["مشاريع الفيديو / شهر", "أعضاء الفريق", "دعم بأولوية"] },
     legal: { termsTitle: "شروط الخدمة", privacyTitle: "سياسة الخصوصية", updated: "آخر تحديث: أغسطس 2026", termsIntro: "تصف هذه الشروط الاتفاقية الخاصة باستخدام reel-listing.com. بإنشاء حساب أو إرسال وسائط عقارية، فإنك توافق على استخدام المنصة بشكل قانوني وتقديم محتوى تملك حق استخدامه.", privacyIntro: "تشرح هذه السياسة كيفية تعامل reel-listing.com مع معلومات الحساب وتفاصيل المشروع والوسائط المرسلة عبر المنصة. نستخدم هذه المعلومات لتقديم الخدمة وحماية مساحة العمل وتحسين المنتج." },
     dashboard: { greeting: "سعداء برؤيتك", title: "مشاريعك", body: "أنشئ أفلام العقارات وراجعها وسلّمها من مساحة عمل واحدة هادئة.", newProject: "مشروع جديد", emptyTitle: "عقارك التالي يستحق نظرة أقرب.", emptyBody: "ابدأ من معرض التجربة الذي أضافه المالك. اختر أقوى الصور، وراجع الاتجاه، ثم وافق على الإنتاج.", emptyAction: "ابدأ مشروعاً", statuses: "مراحل المشروع", view: "عرض المشروع", recent: "آخر التحديثات" },
     upload: { eyebrow: "مشروع جديد", title: "ابدأ المشهد.", body: "أضف صور العقار وموجز العرض القصير الذي يحتاجه مشروعك.", media: "صور العقار", mediaHint: "ارفع من صورة واحدة إلى 10 صور للعقار. JPG أو PNG أو WEBP. حتى 25 ميغابايت إجمالاً.", photoCount: "صور محددة", photoCountReady: "جاهزة للمراجعة", photoCountRemaining: "صور متبقية", drop: "أفلت الصور هنا", browse: "أو تصفح الملفات", titleField: "عنوان العقار", titlePlace: "مثال: بنتهاوس بحري في نخلة جميرا", description: "وصف العرض", descriptionPlace: "بعض التفاصيل لتثبيت القصة…", location: "الموقع", locationPlace: "دبي مارينا، دبي", continue: "إنشاء المشروع", processing: "جارٍ إعداد مشروعك…", remove: "إزالة" },
