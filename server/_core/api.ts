@@ -4,7 +4,6 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { registerProjectMediaUpload } from "../mediaUpload";
 
 export function createApiApp() {
   const app = express();
@@ -12,7 +11,6 @@ export function createApiApp() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
-  registerProjectMediaUpload(app);
   app.use(
     "/api/trpc",
     createExpressMiddleware({
