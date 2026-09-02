@@ -1,7 +1,7 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { and, desc, eq } from "drizzle-orm";
-import { InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
+import { contactMessages, InsertContactMessage, InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -77,6 +77,12 @@ export async function createVideoProject(project: InsertVideoProject) {
   if (!db) throw new Error("Project storage is temporarily unavailable.");
   const result = await db.insert(videoProjects).values(project).returning({ id: videoProjects.id });
   return result[0].id;
+}
+
+export async function insertContactMessage(entry: InsertContactMessage) {
+  const db = await getDb();
+  if (!db) throw new Error("Contact form is temporarily unavailable.");
+  await db.insert(contactMessages).values(entry);
 }
 
 export async function updateVideoProject(
