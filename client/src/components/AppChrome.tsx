@@ -1,11 +1,11 @@
-import { ArrowUpRight, ChevronDown, Globe2, LayoutDashboard, LogOut, Menu, Play, Plus, X } from "lucide-react";
+import { ArrowUpRight, ChevronDown, Globe2, LayoutDashboard, LogOut, Menu, Plus, X } from "lucide-react";
 import { ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { copy, useLocale } from "@/lib/locale";
 
-export function Brand({ light = false }: { light?: boolean }) {
-  return <Link href="/" className={`flex items-center gap-2.5 font-semibold tracking-[-.03em] ${light ? "text-[#F7F2EF]" : "text-[#251811]"}`}><span className="grid h-8 w-8 place-items-center rounded-[10px] bg-[#AE653A] text-white"><Play size={14} fill="currentColor" strokeWidth={0} /></span><span className="text-[17px]">reel-listing<span className="font-normal opacity-60">.com</span></span></Link>;
+export function Brand() {
+  return <Link href="/" className="flex items-center"><img src="/logo.png" alt="Reel Listing" className="h-8 w-auto" /></Link>;
 }
 
 export function LocaleButton({ compact = false }: { compact?: boolean }) {
