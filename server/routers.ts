@@ -6,7 +6,7 @@ import { AUTH_UNAVAILABLE_ERR_MSG, COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { createVideoProject, getVideoProject, listVideoProjects, updateVideoProject } from "./db";
+import { createVideoProject, getVideoProject, insertContactMessage, listVideoProjects, updateVideoProject } from "./db";
 import {
   getApprovalTransition,
   getChangeRequestTransition,
@@ -72,6 +72,27 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+  }),
+  contact: router({
+    submit: publicProcedure
+      .input(
+        z.object({
+          name: z.string().trim().min(1).max(160),
+          email: z.string().trim().email().max(320),
+          message: z.string().trim().min(1).max(4_000),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        try {
+          await insertContactMessage(input);
+        } catch (error) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: error instanceof Error ? error.message : "Unable to send your message.",
+          });
+        }
+        return { success: true } as const;
+      }),
   }),
   projects: router({
     list: protectedProcedure.query(async ({ ctx }) => Promise.all((await listVideoProjects(ctx.user.id)).map(project => presentProject(project, ctx.supabaseAccessToken)))),

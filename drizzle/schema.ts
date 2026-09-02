@@ -45,7 +45,17 @@ export const videoProjects = pgTable(
   table => [index("video_projects_user_idx").on(table.userId)],
 );
 
+export const contactMessages = pgTable("contact_messages", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 160 }).notNull(),
+  email: varchar("email", { length: 320 }).notNull(),
+  message: text("message").notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type VideoProject = typeof videoProjects.$inferSelect;
 export type InsertVideoProject = typeof videoProjects.$inferInsert;
+export type ContactMessage = typeof contactMessages.$inferSelect;
+export type InsertContactMessage = typeof contactMessages.$inferInsert;
