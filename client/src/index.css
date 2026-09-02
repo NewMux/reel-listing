@@ -29,21 +29,21 @@
 
 :root {
   --radius: 1rem;
-  --background: oklch(0.977 0.009 90);
-  --foreground: oklch(0.22 0.027 156);
+  --background: oklch(0.977 0.009 50);
+  --foreground: oklch(0.22 0.027 50);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.22 0.027 156);
-  --primary: oklch(0.25 0.047 157);
-  --primary-foreground: oklch(0.98 0.011 95);
-  --secondary: oklch(0.932 0.035 154);
-  --secondary-foreground: oklch(0.25 0.047 157);
-  --muted: oklch(0.94 0.012 87);
-  --muted-foreground: oklch(0.49 0.025 157);
-  --accent: oklch(0.89 0.073 91);
-  --accent-foreground: oklch(0.25 0.047 157);
-  --border: oklch(0.87 0.019 94);
-  --input: oklch(0.87 0.019 94);
-  --ring: oklch(0.57 0.105 151);
+  --card-foreground: oklch(0.22 0.027 50);
+  --primary: oklch(0.25 0.047 50);
+  --primary-foreground: oklch(0.98 0.011 50);
+  --secondary: oklch(0.932 0.035 50);
+  --secondary-foreground: oklch(0.25 0.047 50);
+  --muted: oklch(0.94 0.012 50);
+  --muted-foreground: oklch(0.49 0.025 50);
+  --accent: oklch(0.89 0.073 50);
+  --accent-foreground: oklch(0.25 0.047 50);
+  --border: oklch(0.87 0.019 50);
+  --input: oklch(0.87 0.019 50);
+  --ring: oklch(0.57 0.105 50);
 }
 
 * { border-color: var(--border); }
