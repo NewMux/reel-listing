@@ -37,10 +37,9 @@ export const copy = {
   en: {
     nav: { product: "Product", pricing: "Pricing", contact: "Contact", signIn: "Sign in", dashboard: "Open dashboard", language: "العربية" },
     home: {
-      eyebrow: "Cinematic films for property listings",
       title: "Make every listing worth a closer look.",
       body: "reel-listing.com turns property photos into considered, cinematic films that help buyers feel the space before they visit. Review the direction before anything is rendered.",
-      start: "Create your first film", watch: "Explore the workflow", trusted: "Designed for ambitious property teams across the Gulf.",
+      start: "Create your first film", watch: "Explore the workflow",
       featureEyebrow: "A better way to present property",
       featureTitle: "Built for the moments that make a space memorable.",
       featureBody: "Choose the strongest frames, shape the sequence, and review the visual direction before production. Your listing stays in view at every step.",
@@ -70,10 +69,9 @@ export const copy = {
   ar: {
     nav: { product: "المنتج", pricing: "الأسعار", contact: "تواصل معنا", signIn: "تسجيل الدخول", dashboard: "لوحة التحكم", language: "English" },
     home: {
-      eyebrow: "أفلام سينمائية للعروض العقارية",
       title: "امنح كل عرض نظرة تليق به.",
       body: "يحوّل reel-listing.com صور العقار إلى أفلام سينمائية مدروسة تساعد المشترين على استشعار المكان قبل زيارته. راجع الاتجاه قبل بدء التوليد.",
-      start: "أنشئ فيلمك الأول", watch: "استكشف طريقة العمل", trusted: "مصمم لفرق العقارات الطموحة في الخليج.",
+      start: "أنشئ فيلمك الأول", watch: "استكشف طريقة العمل",
       featureEyebrow: "طريقة أفضل لتقديم العقار",
       featureTitle: "مصمم للحظات التي تجعل المكان عالقاً في الذاكرة.",
       featureBody: "اختر أقوى اللقطات، وشكّل التسلسل، وراجع الاتجاه البصري قبل بدء الإنتاج. يبقى عرضك حاضراً في كل خطوة.",
