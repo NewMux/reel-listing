@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, Clapperboard, Loader2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { PublicNav, Footer } from "@/components/AppChrome";
@@ -50,10 +50,9 @@ export default function Auth() {
     <PublicNav />
     <main className="mx-auto grid max-w-[1120px] gap-12 px-5 pb-20 pt-12 sm:px-8 sm:pt-20 lg:grid-cols-[.9fr_1.1fr] lg:items-center">
       <section>
-        <div className="inline-flex items-center gap-2 rounded-full border border-[#251811]/10 bg-white/65 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[.15em] text-[#7B5B49]"><Clapperboard size={13} /> Private workspace</div>
         <h1 className="serif mt-6 max-w-[540px] text-5xl leading-[.98] tracking-[-.05em] sm:text-6xl">Your listings, ready for their close-up.</h1>
-        <p className="mt-6 max-w-[500px] text-base leading-7 text-[#6C625C]">Sign in to open the pilot gallery, choose the owner-provided property photos, review the AI direction, and receive the finished cinematic reel in one workspace.</p>
-        <div className="mt-8 space-y-3 text-sm text-[#655952]"><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#8A5537]" /> Your original photo order is preserved.</p><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#8A5537]" /> AI prompt direction is created before rendering.</p><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#8A5537]" /> The final MP4 stays available in your project.</p></div>
+        <p className="mt-6 max-w-[500px] text-base leading-7 text-[#6C625C]">Sign in to open the pilot gallery, choose the owner-provided property photos, review the cinematic direction, and receive the finished reel in one workspace.</p>
+        <div className="mt-8 space-y-3 text-sm text-[#655952]"><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#8A5537]" /> Your original photo order is preserved.</p><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#8A5537]" /> Cinematic direction is created before rendering.</p><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#8A5537]" /> The final MP4 stays available in your project.</p></div>
       </section>
 
       <section className="rounded-[28px] border border-[#251811]/10 bg-white/85 p-6 shadow-[0_24px_70px_rgba(17,37,30,.08)] sm:p-8">
