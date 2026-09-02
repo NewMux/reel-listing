@@ -74,6 +74,10 @@ export function useAuth(options?: UseAuthOptions) {
     if (!redirectOnUnauthenticated) return;
     if (meQuery.isLoading || logoutMutation.isPending) return;
     if (state.user) return;
+    // A failed lookup means we do not know whether they are signed in. Sending
+    // them to the login page on that would loop: they sign in, the lookup fails
+    // again, and they land back here. Let the error surface instead.
+    if (meQuery.error) return;
     if (typeof window === "undefined") return;
     if (redirectPath && window.location.pathname === redirectPath) return;
 
@@ -87,6 +91,7 @@ export function useAuth(options?: UseAuthOptions) {
     redirectOnUnauthenticated,
     redirectPath,
     logoutMutation.isPending,
+    meQuery.error,
     meQuery.isLoading,
     state.user,
   ]);
