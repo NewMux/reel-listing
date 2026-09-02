@@ -46,28 +46,28 @@ export default function Auth() {
     }
   };
 
-  return <div className="min-h-screen bg-[#F7F5EF] text-[#11251E]">
+  return <div className="min-h-screen bg-[#F7F2EF] text-[#251811]">
     <PublicNav />
     <main className="mx-auto grid max-w-[1120px] gap-12 px-5 pb-20 pt-12 sm:px-8 sm:pt-20 lg:grid-cols-[.9fr_1.1fr] lg:items-center">
       <section>
-        <div className="inline-flex items-center gap-2 rounded-full border border-[#11251E]/10 bg-white/65 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[.15em] text-[#687B49]"><Clapperboard size={13} /> Private workspace</div>
+        <div className="inline-flex items-center gap-2 rounded-full border border-[#251811]/10 bg-white/65 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[.15em] text-[#7B5B49]"><Clapperboard size={13} /> Private workspace</div>
         <h1 className="serif mt-6 max-w-[540px] text-5xl leading-[.98] tracking-[-.05em] sm:text-6xl">Your listings, ready for their close-up.</h1>
-        <p className="mt-6 max-w-[500px] text-base leading-7 text-[#5C6C63]">Sign in to open the pilot gallery, choose the owner-provided property photos, review the AI direction, and receive the finished cinematic reel in one workspace.</p>
-        <div className="mt-8 space-y-3 text-sm text-[#52655A]"><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#6C8A37]" /> Your original photo order is preserved.</p><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#6C8A37]" /> AI prompt direction is created before rendering.</p><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#6C8A37]" /> The final MP4 stays available in your project.</p></div>
+        <p className="mt-6 max-w-[500px] text-base leading-7 text-[#6C625C]">Sign in to open the pilot gallery, choose the owner-provided property photos, review the AI direction, and receive the finished cinematic reel in one workspace.</p>
+        <div className="mt-8 space-y-3 text-sm text-[#655952]"><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#8A5537]" /> Your original photo order is preserved.</p><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#8A5537]" /> AI prompt direction is created before rendering.</p><p className="flex items-center gap-2"><CheckCircle2 size={16} className="text-[#8A5537]" /> The final MP4 stays available in your project.</p></div>
       </section>
 
-      <section className="rounded-[28px] border border-[#11251E]/10 bg-white/85 p-6 shadow-[0_24px_70px_rgba(17,37,30,.08)] sm:p-8">
-        <div className="flex gap-2 rounded-xl bg-[#F0F2E9] p-1"><button type="button" onClick={() => { setMode("signIn"); setError(""); setMessage(""); }} className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-bold ${mode === "signIn" ? "bg-white text-[#11251E] shadow-sm" : "text-[#68766E]"}`}>Sign in</button><button type="button" onClick={() => { setMode("signUp"); setError(""); setMessage(""); }} className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-bold ${mode === "signUp" ? "bg-white text-[#11251E] shadow-sm" : "text-[#68766E]"}`}>Create account</button></div>
+      <section className="rounded-[28px] border border-[#251811]/10 bg-white/85 p-6 shadow-[0_24px_70px_rgba(17,37,30,.08)] sm:p-8">
+        <div className="flex gap-2 rounded-xl bg-[#F2ECE9] p-1"><button type="button" onClick={() => { setMode("signIn"); setError(""); setMessage(""); }} className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-bold ${mode === "signIn" ? "bg-white text-[#251811] shadow-sm" : "text-[#766D68]"}`}>Sign in</button><button type="button" onClick={() => { setMode("signUp"); setError(""); setMessage(""); }} className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-bold ${mode === "signUp" ? "bg-white text-[#251811] shadow-sm" : "text-[#766D68]"}`}>Create account</button></div>
         <h2 className="serif mt-8 text-3xl tracking-[-.04em]">{mode === "signIn" ? "Welcome back." : "Create your workspace."}</h2>
-        <p className="mt-2 text-sm leading-6 text-[#6B7A71]">{mode === "signIn" ? "Continue creating refined listing films." : "Use your email to save projects and access the owner-provided pilot gallery."}</p>
+        <p className="mt-2 text-sm leading-6 text-[#7A706B]">{mode === "signIn" ? "Continue creating refined listing films." : "Use your email to save projects and access the owner-provided pilot gallery."}</p>
         <form onSubmit={submit} className="mt-7 space-y-4">
-          <label className="block"><span className="text-xs font-bold uppercase tracking-[.12em] text-[#687B49]">Email</span><input required type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#11251E]/12 bg-[#FCFCF9] px-4 text-sm outline-none focus:border-[#759345]" placeholder="you@agency.com" /></label>
-          <label className="block"><span className="text-xs font-bold uppercase tracking-[.12em] text-[#687B49]">Password</span><input required minLength={6} type="password" autoComplete={mode === "signIn" ? "current-password" : "new-password"} value={password} onChange={event => setPassword(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#11251E]/12 bg-[#FCFCF9] px-4 text-sm outline-none focus:border-[#759345]" placeholder="At least 6 characters" /></label>
-          {message && <p className="flex items-start gap-2 rounded-xl bg-[#F0F7E6] px-4 py-3 text-sm leading-6 text-[#4C702C]"><CheckCircle2 size={17} className="mt-0.5 shrink-0" />{message}</p>}
-          {error && <p className="rounded-xl bg-[#FFF1E5] px-4 py-3 text-sm leading-6 text-[#94572C]">{error}</p>}
-          <button disabled={busy} className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#11251E] text-sm font-bold text-white hover:bg-[#244035] disabled:cursor-wait disabled:opacity-70">{busy ? <Loader2 size={17} className="animate-spin" /> : <ArrowRight size={17} />}{mode === "signIn" ? "Sign in" : "Create account"}</button>
+          <label className="block"><span className="text-xs font-bold uppercase tracking-[.12em] text-[#7B5B49]">Email</span><input required type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#251811]/12 bg-[#FCFAF9] px-4 text-sm outline-none focus:border-[#936245]" placeholder="you@agency.com" /></label>
+          <label className="block"><span className="text-xs font-bold uppercase tracking-[.12em] text-[#7B5B49]">Password</span><input required minLength={6} type="password" autoComplete={mode === "signIn" ? "current-password" : "new-password"} value={password} onChange={event => setPassword(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#251811]/12 bg-[#FCFAF9] px-4 text-sm outline-none focus:border-[#936245]" placeholder="At least 6 characters" /></label>
+          {message && <p className="flex items-start gap-2 rounded-xl bg-[#F7ECE6] px-4 py-3 text-sm leading-6 text-[#70452C]"><CheckCircle2 size={17} className="mt-0.5 shrink-0" />{message}</p>}
+          {error && <p className="rounded-xl bg-[#FFEFE5] px-4 py-3 text-sm leading-6 text-[#94522C]">{error}</p>}
+          <button disabled={busy} className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white hover:bg-[#402E24] disabled:cursor-wait disabled:opacity-70">{busy ? <Loader2 size={17} className="animate-spin" /> : <ArrowRight size={17} />}{mode === "signIn" ? "Sign in" : "Create account"}</button>
         </form>
-        <p className="mt-6 text-center text-xs leading-5 text-[#7A877F]">By continuing, you agree to the <Link href="/terms" className="font-semibold underline underline-offset-2">Terms</Link> and <Link href="/privacy" className="font-semibold underline underline-offset-2">Privacy Policy</Link>.</p>
+        <p className="mt-6 text-center text-xs leading-5 text-[#877F7A]">By continuing, you agree to the <Link href="/terms" className="font-semibold underline underline-offset-2">Terms</Link> and <Link href="/privacy" className="font-semibold underline underline-offset-2">Privacy Policy</Link>.</p>
       </section>
     </main>
     <Footer />

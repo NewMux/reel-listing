@@ -134,60 +134,60 @@ export default function Pilot() {
   };
 
   return (
-    <div className="min-h-screen overflow-hidden bg-[#F7F5EF] text-[#11251E]">
+    <div className="min-h-screen overflow-hidden bg-[#F7F2EF] text-[#251811]">
       <PublicNav />
       <main className="mx-auto max-w-[1120px] px-5 pb-20 pt-8 sm:px-8 sm:pt-14">
         <div className="mb-8 flex items-center justify-between gap-4">
-          <button onClick={() => setLocation("/")} className="inline-flex items-center gap-2 text-sm font-semibold text-[#52655a] hover:text-[#11251E]"><ArrowLeft size={16}/>{t.back}</button>
-          <span className="rounded-full border border-[#11251E]/10 bg-white/65 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[.14em] text-[#687B49]">{t.eyebrow}</span>
+          <button onClick={() => setLocation("/")} className="inline-flex items-center gap-2 text-sm font-semibold text-[#655952] hover:text-[#251811]"><ArrowLeft size={16}/>{t.back}</button>
+          <span className="rounded-full border border-[#251811]/10 bg-white/65 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[.14em] text-[#7B5B49]">{t.eyebrow}</span>
         </div>
 
         <section className="grid gap-8 lg:grid-cols-[.8fr_1.2fr] lg:items-start">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[.16em] text-[#687B49]">{step === 1 ? t.step : t.details}</p>
+            <p className="text-xs font-bold uppercase tracking-[.16em] text-[#7B5B49]">{step === 1 ? t.step : t.details}</p>
             <h1 className="serif mt-4 max-w-[520px] text-5xl leading-[.98] tracking-[-.05em] sm:text-6xl">{complete ? t.successTitle : step === 1 ? t.title : t.detailsTitle}</h1>
-            <p className="mt-6 max-w-[500px] text-base leading-7 text-[#5C6C63]">{complete ? t.successBody : step === 1 ? t.body : t.detailsBody}</p>
-            <div className="mt-8 rounded-2xl border border-[#11251E]/10 bg-white/65 p-4 text-sm leading-6 text-[#68766e]">{t.privacy}</div>
+            <p className="mt-6 max-w-[500px] text-base leading-7 text-[#6C625C]">{complete ? t.successBody : step === 1 ? t.body : t.detailsBody}</p>
+            <div className="mt-8 rounded-2xl border border-[#251811]/10 bg-white/65 p-4 text-sm leading-6 text-[#766D68]">{t.privacy}</div>
           </div>
 
-          <div className="rounded-[28px] border border-[#11251E]/10 bg-white/82 p-5 shadow-[0_22px_60px_rgba(17,37,30,.08)] sm:p-7">
+          <div className="rounded-[28px] border border-[#251811]/10 bg-white/82 p-5 shadow-[0_22px_60px_rgba(17,37,30,.08)] sm:p-7">
             {complete ? (
               <div className="text-center">
-                <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-[#D8E9B2] text-[#365716]"><Check size={30}/></div>
-                <p className="mt-7 text-xs font-bold uppercase tracking-[.15em] text-[#687B49]">{t.successEyebrow}</p>
-                <p className="mt-3 text-sm text-[#68766e]">{t.code}: <strong className="text-[#11251E]">{reference}</strong></p>
-                <button onClick={shareFiles} className="mt-8 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#11251E] px-5 text-sm font-bold text-white hover:bg-[#244035]"><Share2 size={17}/>{t.share}</button>
-                {message && <p className="mt-4 rounded-xl bg-[#FFF0D0] px-4 py-3 text-sm leading-6 text-[#8B5A08]">{message}</p>}
-                <button onClick={clearAll} className="mt-5 text-sm font-semibold text-[#52655a] underline underline-offset-4">{t.startOver}</button>
+                <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-[#E9C6B2] text-[#572E16]"><Check size={30}/></div>
+                <p className="mt-7 text-xs font-bold uppercase tracking-[.15em] text-[#7B5B49]">{t.successEyebrow}</p>
+                <p className="mt-3 text-sm text-[#766D68]">{t.code}: <strong className="text-[#251811]">{reference}</strong></p>
+                <button onClick={shareFiles} className="mt-8 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#251811] px-5 text-sm font-bold text-white hover:bg-[#402E24]"><Share2 size={17}/>{t.share}</button>
+                {message && <p className="mt-4 rounded-xl bg-[#FFE1D0] px-4 py-3 text-sm leading-6 text-[#8B3808]">{message}</p>}
+                <button onClick={clearAll} className="mt-5 text-sm font-semibold text-[#655952] underline underline-offset-4">{t.startOver}</button>
               </div>
             ) : step === 1 ? (
               <>
                 <div className="flex items-start justify-between gap-4">
-                  <div><h2 className="text-xl font-bold">{t.choose}</h2><p className="mt-2 text-sm leading-6 text-[#718078]">{t.chooseBody}</p></div>
-                  <span className="shrink-0 rounded-full bg-[#D8E9B2] px-3 py-1.5 text-xs font-bold text-[#365716]">{selectedCount}/{REQUIRED_PHOTOS} {t.selected}</span>
+                  <div><h2 className="text-xl font-bold">{t.choose}</h2><p className="mt-2 text-sm leading-6 text-[#807671]">{t.chooseBody}</p></div>
+                  <span className="shrink-0 rounded-full bg-[#E9C6B2] px-3 py-1.5 text-xs font-bold text-[#572E16]">{selectedCount}/{REQUIRED_PHOTOS} {t.selected}</span>
                 </div>
-                <label className="mt-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-[#7D9364]/45 bg-[#F8F9F2] px-5 py-8 text-center transition hover:bg-[#F0F5E5]">
-                  <ImagePlus size={24} className="text-[#58782B]" />
-                  <span className="mt-3 text-sm font-bold text-[#355041]">{selectedCount ? t.replace : t.browse}</span>
+                <label className="mt-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-[#937564]/45 bg-[#F9F5F2] px-5 py-8 text-center transition hover:bg-[#F5EBE5]">
+                  <ImagePlus size={24} className="text-[#78472B]" />
+                  <span className="mt-3 text-sm font-bold text-[#503F35]">{selectedCount ? t.replace : t.browse}</span>
                   <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" onChange={(event) => chooseFiles(event.target.files)} />
                 </label>
                 <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                  {files.map((file, index) => <div key={index} className={`relative aspect-[4/3] overflow-hidden rounded-xl border ${file ? "border-[#B6CE74] bg-[#EFF5E1]" : "border-[#11251E]/8 bg-[#F7F5EF]"}`}>
-                    {file ? <><img src={URL.createObjectURL(file)} alt={`Photo ${index + 1}`} className="h-full w-full object-cover" /><span className="absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-lg bg-[#11251E]/80 text-[11px] font-bold text-white">{index + 1}</span></> : <span className="grid h-full place-items-center text-xs font-bold text-[#A6B0A8]">{index + 1}</span>}
+                  {files.map((file, index) => <div key={index} className={`relative aspect-[4/3] overflow-hidden rounded-xl border ${file ? "border-[#CE9574] bg-[#F5E8E1]" : "border-[#251811]/8 bg-[#F7F2EF]"}`}>
+                    {file ? <><img src={URL.createObjectURL(file)} alt={`Photo ${index + 1}`} className="h-full w-full object-cover" /><span className="absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-lg bg-[#251811]/80 text-[11px] font-bold text-white">{index + 1}</span></> : <span className="grid h-full place-items-center text-xs font-bold text-[#B0AAA6]">{index + 1}</span>}
                   </div>)}
                 </div>
-                {message && <p className="mt-4 rounded-xl bg-[#FFF0D0] px-4 py-3 text-sm leading-6 text-[#8B5A08]">{message}</p>}
-                <div className="mt-6 flex items-center justify-between gap-3"><button onClick={clearAll} className="inline-flex items-center gap-2 text-sm font-semibold text-[#52655a] hover:text-[#11251E]"><Trash2 size={15}/>{t.clear}</button><button onClick={() => ready ? setStep(2) : setMessage(t.need)} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#11251E] px-4 text-sm font-bold text-white hover:bg-[#244035] disabled:opacity-40">{t.continue}<ArrowUpRight size={15}/></button></div>
+                {message && <p className="mt-4 rounded-xl bg-[#FFE1D0] px-4 py-3 text-sm leading-6 text-[#8B3808]">{message}</p>}
+                <div className="mt-6 flex items-center justify-between gap-3"><button onClick={clearAll} className="inline-flex items-center gap-2 text-sm font-semibold text-[#655952] hover:text-[#251811]"><Trash2 size={15}/>{t.clear}</button><button onClick={() => ready ? setStep(2) : setMessage(t.need)} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#251811] px-4 text-sm font-bold text-white hover:bg-[#402E24] disabled:opacity-40">{t.continue}<ArrowUpRight size={15}/></button></div>
               </>
             ) : (
               <>
-                <div className="mb-6 flex items-center gap-2 text-sm font-bold text-[#355041]"><span className="grid h-8 w-8 place-items-center rounded-lg bg-[#D8E9B2] text-[#365716]">{selectedCount}</span>{t.choose}</div>
+                <div className="mb-6 flex items-center gap-2 text-sm font-bold text-[#503F35]"><span className="grid h-8 w-8 place-items-center rounded-lg bg-[#E9C6B2] text-[#572E16]">{selectedCount}</span>{t.choose}</div>
                 <div className="space-y-4">
-                  <label className="block text-sm font-semibold text-[#355041]">{t.name}<input value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#11251E]/10 bg-[#F8F9F2] px-3 text-sm outline-none focus:border-[#7D9364]" /></label>
-                  <label className="block text-sm font-semibold text-[#355041]">{t.phone} <span className="font-normal text-[#91A096]">({t.optional})</span><input value={phone} onChange={(event) => setPhone(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#11251E]/10 bg-[#F8F9F2] px-3 text-sm outline-none focus:border-[#7D9364]" /></label>
-                  <label className="block text-sm font-semibold text-[#355041]">{t.property} <span className="font-normal text-[#91A096]">({t.optional})</span><input value={property} onChange={(event) => setProperty(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#11251E]/10 bg-[#F8F9F2] px-3 text-sm outline-none focus:border-[#7D9364]" /></label>
+                  <label className="block text-sm font-semibold text-[#503F35]">{t.name}<input value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#251811]/10 bg-[#F9F5F2] px-3 text-sm outline-none focus:border-[#937564]" /></label>
+                  <label className="block text-sm font-semibold text-[#503F35]">{t.phone} <span className="font-normal text-[#A09691]">({t.optional})</span><input value={phone} onChange={(event) => setPhone(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#251811]/10 bg-[#F9F5F2] px-3 text-sm outline-none focus:border-[#937564]" /></label>
+                  <label className="block text-sm font-semibold text-[#503F35]">{t.property} <span className="font-normal text-[#A09691]">({t.optional})</span><input value={property} onChange={(event) => setProperty(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#251811]/10 bg-[#F9F5F2] px-3 text-sm outline-none focus:border-[#937564]" /></label>
                 </div>
-                <div className="mt-7 flex items-center justify-between gap-3"><button onClick={() => setStep(1)} className="text-sm font-semibold text-[#52655a]">{t.back}</button><button onClick={() => setComplete(true)} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#11251E] px-4 text-sm font-bold text-white hover:bg-[#244035]">{t.finish}<ArrowUpRight size={15}/></button></div>
+                <div className="mt-7 flex items-center justify-between gap-3"><button onClick={() => setStep(1)} className="text-sm font-semibold text-[#655952]">{t.back}</button><button onClick={() => setComplete(true)} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#251811] px-4 text-sm font-bold text-white hover:bg-[#402E24]">{t.finish}<ArrowUpRight size={15}/></button></div>
               </>
             )}
           </div>
