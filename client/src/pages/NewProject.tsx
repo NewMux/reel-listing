@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { AppSidebar } from "@/components/AppChrome";
 import { copy, useLocale } from "@/lib/locale";
 import { trpc } from "@/lib/trpc";
+import { withRetry } from "@shared/retry";
 
 const MAX_PHOTOS = 10;
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -114,8 +115,11 @@ export default function NewProject() {
 
       for (const item of files) {
         const target = await createUploadTarget.mutateAsync({ name: item.file.name, type: item.file.type });
-        const upload = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": item.file.type }, body: item.file });
-        if (!upload.ok) throw new Error(`Upload failed (${upload.status}). Please try again.`);
+        await withRetry(async () => {
+          const upload = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": item.file.type }, body: item.file });
+          if (!upload.ok) throw new Error(`Upload failed (${upload.status}). Please try again.`);
+          return upload;
+        }, { label: "photo upload" });
         uploads.push({ name: item.file.name, type: item.file.type, key: target.key, url: target.url });
         completeBytes += item.file.size;
         setUploadProgress(Math.min(88, Math.round((completeBytes / totalBytes) * 88)));

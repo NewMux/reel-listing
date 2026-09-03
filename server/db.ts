@@ -1,6 +1,6 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { contactMessages, InsertContactMessage, InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -53,6 +53,25 @@ export async function getUserByOpenId(openId: string) {
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result[0];
+}
+
+/** Atomically decrements the user's included-video quota. Returns the new count, or null if they have none left. */
+export async function decrementVideoQuota(userId: number): Promise<number | null> {
+  const db = await getDb();
+  if (!db) throw new Error("Account storage is temporarily unavailable.");
+  const result = await db
+    .update(users)
+    .set({ videosRemaining: sql`${users.videosRemaining} - 1` })
+    .where(and(eq(users.id, userId), gt(users.videosRemaining, 0)))
+    .returning({ videosRemaining: users.videosRemaining });
+  return result[0]?.videosRemaining ?? null;
+}
+
+/** Refunds one video credit, used when a render fails to actually start after the quota was already spent. */
+export async function incrementVideoQuota(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(users).set({ videosRemaining: sql`${users.videosRemaining} + 1` }).where(eq(users.id, userId));
 }
 
 export async function listVideoProjects(userId: number) {

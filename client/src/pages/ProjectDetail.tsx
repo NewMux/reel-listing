@@ -6,6 +6,7 @@ import { AppSidebar, StatusPill } from "@/components/AppChrome";
 import { stitchClips, type StitchProgress } from "@/lib/stitchVideos";
 import { copy, useLocale } from "@/lib/locale";
 import { trpc } from "@/lib/trpc";
+import { withRetry } from "@shared/retry";
 
 function estimate(status: string, locale: "en" | "ar") {
   if (status === "Review") return locale === "en" ? "Awaiting your approval" : "بانتظار موافقتك";
@@ -29,6 +30,7 @@ export default function ProjectDetail() {
   const [localFinalVideoUrl, setLocalFinalVideoUrl] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [sourceAspect, setSourceAspect] = useState<{ w: number; h: number } | null>(null);
+  const [failureStreak, setFailureStreak] = useState(0);
   const assemblyRef = useRef(false);
   const utils = trpc.useUtils();
   const project = trpc.projects.get.useQuery({ id }, { enabled: Number.isSafeInteger(id) });
@@ -57,11 +59,14 @@ export default function ProjectDetail() {
     try {
       const finalBlob = await stitchClips(clipUrls as string[], progress => setAssemblyProgress(progress));
       const target = await createOutputTarget.mutateAsync({ name: `${safeFileName(project.data?.title || "reel-listing-film")}.mp4`, type: "video/mp4" });
-      const upload = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": "video/mp4" }, body: finalBlob });
-      if (!upload.ok) {
-        const providerMessage = (await upload.text().catch(() => "")).trim();
-        throw new Error(providerMessage ? `The final reel could not be saved (${upload.status}): ${providerMessage.slice(0, 240)}` : `The final reel could not be saved (${upload.status}).`);
-      }
+      await withRetry(async () => {
+        const upload = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": "video/mp4" }, body: finalBlob });
+        if (!upload.ok) {
+          const providerMessage = (await upload.text().catch(() => "")).trim();
+          throw new Error(providerMessage ? `The final reel could not be saved (${upload.status}): ${providerMessage.slice(0, 240)}` : `The final reel could not be saved (${upload.status}).`);
+        }
+        return upload;
+      }, { label: "final reel upload" });
       await complete.mutateAsync({ id, finalVideoUrl: target.url });
       setLocalFinalVideoUrl(target.url);
       setAssemblyProgress({ progress: 100, currentStep: locale === "en" ? "Your cinematic reel is ready to share." : "فيلمك السينمائي جاهز للمشاركة." });
@@ -81,6 +86,13 @@ export default function ProjectDetail() {
     if (render.data?.phase === "assembly" && !localFinalVideoUrl && !assemblyRef.current) void assembleFinalReel();
   }, [render.data?.phase, render.data?.completedShots, localFinalVideoUrl]);
 
+  // A single "failed" poll is often just a transient hiccup that self-heals on the next
+  // poll (a fal.ai shot can be retried by simply polling again). Require it to persist
+  // across a couple of poll cycles before treating it as a real, user-facing failure.
+  useEffect(() => {
+    setFailureStreak(current => (render.data?.phase === "failed" ? current + 1 : 0));
+  }, [render.data?.phase, render.data?.completedShots]);
+
   const firstSourceUrl = project.data?.mediaUrls[0];
   useEffect(() => {
     if (!firstSourceUrl) return;
@@ -98,7 +110,7 @@ export default function ProjectDetail() {
   const renderStatus = render.data;
   const displayStatus = localFinalVideoUrl || renderStatus?.status === "Done" || data.status === "Done" ? "Done" : data.status;
   const finalVideoUrl = localFinalVideoUrl || renderStatus?.finalVideoUrl || data.finalVideoUrl;
-  const isFailed = renderStatus?.phase === "failed";
+  const isFailed = failureStreak >= 2;
   const canDeliver = displayStatus === "Done" && !!finalVideoUrl;
   const progress = assemblyProgress?.progress ?? renderStatus?.overallProgress ?? 0;
   const completedShots = renderStatus?.completedShots ?? 0;
@@ -151,7 +163,7 @@ export default function ProjectDetail() {
             </div>
 
             {displayStatus === "Processing" && (renderStatus || assemblyProgress) && <div className="mt-6 rounded-[24px] border border-[#251811]/10 bg-white p-5 shadow-[0_16px_40px_rgba(17,37,30,.04)] sm:p-6"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#825E49]">{locale === "en" ? "Production progress" : "تقدم الإنتاج"}</p><h2 className="serif mt-2 text-3xl tracking-[-.04em]">{isAssembling ? (locale === "en" ? "One final stitch" : "اللمسة النهائية") : (locale === "en" ? "Building your film" : "جارٍ بناء فيلمك")}</h2></div><span className="text-2xl font-bold tracking-[-.05em] text-[#71472F]">{progress}%</span></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[#EDE4DF]"><div className="h-full rounded-full bg-[#976141] transition-all duration-500" style={{ width: `${progress}%` }} /></div><div className="mt-3 flex items-center justify-between gap-3 text-xs text-[#89807B]"><span>{currentStep}</span><span>{completedShots}/{data.mediaUrls.length} {locale === "en" ? "clips" : "مقاطع"}</span></div><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">{shots.map(shot => <div key={shot.index} className={`rounded-xl border p-2 ${shot.state === "complete" ? "border-[#D9B7A4] bg-[#F7ECE5]" : shot.state === "failed" ? "border-[#E6C4B0] bg-[#FFEFE5]" : shot.state === "rendering" ? "border-[#E4C8B8] bg-[#FFF4ED]" : "border-[#E9E4E1] bg-[#FAF8F7]"}`}><div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-[#E8E2DE]"><img src={shot.sourceUrl} className="h-full w-full object-cover" alt={`${locale === "en" ? "Shot" : "لقطة"} ${shot.index + 1}`} />{shot.state === "complete" && <span className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-[#E9C6B2] text-[#6B422A]"><CheckCircle2 size={12} /></span>}{shot.state === "rendering" && <span className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-[#835338]"><Loader2 size={12} className="animate-spin" /></span>}</div><p className="mt-2 truncate text-[10px] font-bold text-[#65564E]">{shot.roomType}</p><p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[#877F7A]">{shot.prompt}</p></div>)}</div></div>}
-            {renderStatus?.phase === "failed" && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E6C4B0] bg-[#FFEFE5] px-4 py-3 text-sm leading-6 text-[#94522C]"><span>{renderStatus.error || "fal.ai could not complete one or more clips."}</span></div>}
+            {isFailed && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E6C4B0] bg-[#FFEFE5] px-4 py-3 text-sm leading-6 text-[#94522C]"><span>{renderStatus?.error || "fal.ai could not complete one or more clips."}</span></div>}
             {renderError && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E6C4B0] bg-[#FFEFE5] px-4 py-3 text-sm leading-6 text-[#94522C]"><span>{renderError}</span><button onClick={() => { setAssemblyProgress(null); void assembleFinalReel(); }} className="rounded-lg bg-[#94522C] px-3 py-1.5 text-xs font-bold text-white">{locale === "en" ? "Try assembly again" : "حاول الجمع مرة أخرى"}</button></div>}
           </div>
 

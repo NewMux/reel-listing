@@ -3,6 +3,7 @@ import { fetchFile } from "@ffmpeg/util";
 import coreURL from "@ffmpeg/core?url";
 import wasmURL from "@ffmpeg/core/wasm?url";
 import { FAL_CLIP_SECONDS } from "@shared/video";
+import { withRetry } from "@shared/retry";
 
 export type StitchProgress = {
   progress: number;
@@ -25,9 +26,11 @@ async function getFFmpeg() {
 }
 
 async function fetchClip(url: string) {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`A generated clip could not be downloaded (${response.status}).`);
-  return response.blob();
+  return withRetry(async () => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`A generated clip could not be downloaded (${response.status}).`);
+    return response.blob();
+  }, { label: "clip download", retries: 3, baseDelayMs: 500, maxDelayMs: 5_000 });
 }
 
 async function runWithProgress(
