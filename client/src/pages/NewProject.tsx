@@ -9,8 +9,29 @@ const MAX_PHOTOS = 10;
 const MAX_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
-type LocalFile = { file: File; preview: string };
+type Orientation = "landscape" | "portrait" | "square";
+type LocalFile = { file: File; preview: string; orientation: Orientation };
 type UploadedMedia = { name: string; type: string; key: string; url: string };
+
+function readOrientation(file: File): Promise<Orientation> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img.naturalWidth === img.naturalHeight ? "square" : img.naturalWidth > img.naturalHeight ? "landscape" : "portrait");
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read this image."));
+    };
+    img.src = url;
+  });
+}
+
+function conflictingOrientation(a: Orientation, b: Orientation) {
+  return a !== "square" && b !== "square" && a !== b;
+}
 
 export default function NewProject() {
   const { locale } = useLocale();
@@ -36,14 +57,26 @@ export default function NewProject() {
     },
   });
 
-  const addFiles = (next: File[]) => {
+  const addFiles = async (next: File[]) => {
     setError("");
     const accepted = next.filter(file => ACCEPTED_TYPES.includes(file.type));
     if (accepted.length !== next.length) return setError("Use JPG, PNG, or WEBP image files.");
 
+    let orientations: Orientation[];
+    try {
+      orientations = await Promise.all(accepted.map(readOrientation));
+    } catch {
+      return setError("Could not read one of these images. Please try a different file.");
+    }
+
+    const established = files.map(item => item.orientation).find(o => o !== "square") ?? orientations.find(o => o !== "square");
+    if (established && orientations.some(o => conflictingOrientation(o, established))) {
+      return setError(t.upload.mixedOrientation);
+    }
+
     const merged = [
       ...files,
-      ...accepted.map(file => ({ file, preview: URL.createObjectURL(file) })),
+      ...accepted.map((file, index) => ({ file, preview: URL.createObjectURL(file), orientation: orientations[index] })),
     ];
     if (merged.length > MAX_PHOTOS) return setError(`You can upload up to ${MAX_PHOTOS} photos.`);
     if (merged.reduce((sum, item) => sum + item.file.size, 0) > MAX_BYTES) {
@@ -53,14 +86,14 @@ export default function NewProject() {
   };
 
   const browse = (event: ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files) addFiles(Array.from(event.target.files));
+    if (event.target.files) void addFiles(Array.from(event.target.files));
     event.target.value = "";
   };
 
   const drop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setDragging(false);
-    addFiles(Array.from(event.dataTransfer.files));
+    void addFiles(Array.from(event.dataTransfer.files));
   };
 
   const removeFile = (index: number) => {

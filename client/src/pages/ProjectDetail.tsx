@@ -28,6 +28,7 @@ export default function ProjectDetail() {
   const [assemblyProgress, setAssemblyProgress] = useState<StitchProgress | null>(null);
   const [localFinalVideoUrl, setLocalFinalVideoUrl] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [sourceAspect, setSourceAspect] = useState<{ w: number; h: number } | null>(null);
   const assemblyRef = useRef(false);
   const utils = trpc.useUtils();
   const project = trpc.projects.get.useQuery({ id }, { enabled: Number.isSafeInteger(id) });
@@ -80,6 +81,16 @@ export default function ProjectDetail() {
     if (render.data?.phase === "assembly" && !localFinalVideoUrl && !assemblyRef.current) void assembleFinalReel();
   }, [render.data?.phase, render.data?.completedShots, localFinalVideoUrl]);
 
+  const firstSourceUrl = project.data?.mediaUrls[0];
+  useEffect(() => {
+    if (!firstSourceUrl) return;
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => { if (!cancelled) setSourceAspect({ w: img.naturalWidth, h: img.naturalHeight }); };
+    img.src = firstSourceUrl;
+    return () => { cancelled = true; };
+  }, [firstSourceUrl]);
+
   if (project.isLoading) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.loading}</div></AppSidebar>;
   if (!project.data) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">Project not found.</div></AppSidebar>;
 
@@ -121,6 +132,8 @@ export default function ProjectDetail() {
 
   const isAssembling = renderStatus?.phase === "assembly" || assemblyProgress !== null;
   const currentStep = assemblyProgress?.currentStep || renderStatus?.currentStep || (locale === "en" ? "Starting cinematic production…" : "جارٍ بدء الإنتاج السينمائي…");
+  const isPortrait = !!sourceAspect && sourceAspect.h > sourceAspect.w;
+  const playerAspectStyle = sourceAspect ? { aspectRatio: `${sourceAspect.w} / ${sourceAspect.h}` } : undefined;
 
   return (
     <AppSidebar>
@@ -133,8 +146,8 @@ export default function ProjectDetail() {
             <h1 className="serif mt-3 text-5xl tracking-[-.05em]">{data.title}</h1>
             {data.description && <p className="mt-4 max-w-[580px] text-sm leading-7 text-[#756B65]">{data.description}</p>}
 
-            <div className="mt-8 overflow-hidden rounded-[27px] bg-[#E7DDD7]">
-              {canDeliver ? <video src={finalVideoUrl || undefined} controls className="aspect-video w-full bg-[#291910]" /> : <div className="grid aspect-video place-items-center p-8 text-center"><span className={`grid h-14 w-14 place-items-center rounded-full ${isFailed ? "bg-[#FFEFE5] text-[#94522C]" : displayStatus === "Processing" ? "bg-white text-[#6D4F3D]" : "bg-[#E1BBA5] text-[#754224]"}`}>{isFailed ? <span className="text-xl font-bold">!</span> : displayStatus === "Processing" ? <Loader2 className="animate-spin" size={23} /> : displayStatus === "Done" ? <CheckCircle2 size={24} /> : <Film size={24} />}</span><p className="mt-4 text-sm font-bold text-[#513D31]">{isFailed ? (locale === "en" ? "Generation stopped" : "توقف التوليد") : displayStatus === "Processing" ? (isAssembling ? (locale === "en" ? "Assembling your reel" : "جارٍ جمع فيلمك") : (locale === "en" ? "Generating your clips" : "جارٍ توليد المقاطع")) : estimate(displayStatus, locale)}</p><p className="mt-1 max-w-xs text-xs leading-5 text-[#7A6D65]">{isFailed ? (renderStatus?.error || (locale === "en" ? "The render stopped before all clips were completed." : "توقف التوليد قبل اكتمال جميع المقاطع.")) : displayStatus === "Processing" ? currentStep : t.project.unavailable}</p></div>}
+            <div className={`mt-8 overflow-hidden rounded-[27px] bg-[#E7DDD7] ${isPortrait ? "mx-auto max-w-[420px]" : ""}`}>
+              {canDeliver ? <video src={finalVideoUrl || undefined} controls className={`w-full bg-[#291910] ${sourceAspect ? "" : "aspect-video"}`} style={playerAspectStyle} /> : <div className={`grid place-items-center p-8 text-center ${sourceAspect ? "" : "aspect-video"}`} style={playerAspectStyle}><span className={`grid h-14 w-14 place-items-center rounded-full ${isFailed ? "bg-[#FFEFE5] text-[#94522C]" : displayStatus === "Processing" ? "bg-white text-[#6D4F3D]" : "bg-[#E1BBA5] text-[#754224]"}`}>{isFailed ? <span className="text-xl font-bold">!</span> : displayStatus === "Processing" ? <Loader2 className="animate-spin" size={23} /> : displayStatus === "Done" ? <CheckCircle2 size={24} /> : <Film size={24} />}</span><p className="mt-4 text-sm font-bold text-[#513D31]">{isFailed ? (locale === "en" ? "Generation stopped" : "توقف التوليد") : displayStatus === "Processing" ? (isAssembling ? (locale === "en" ? "Assembling your reel" : "جارٍ جمع فيلمك") : (locale === "en" ? "Generating your clips" : "جارٍ توليد المقاطع")) : estimate(displayStatus, locale)}</p><p className="mt-1 max-w-xs text-xs leading-5 text-[#7A6D65]">{isFailed ? (renderStatus?.error || (locale === "en" ? "The render stopped before all clips were completed." : "توقف التوليد قبل اكتمال جميع المقاطع.")) : displayStatus === "Processing" ? currentStep : t.project.unavailable}</p></div>}
             </div>
 
             {displayStatus === "Processing" && (renderStatus || assemblyProgress) && <div className="mt-6 rounded-[24px] border border-[#251811]/10 bg-white p-5 shadow-[0_16px_40px_rgba(17,37,30,.04)] sm:p-6"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#825E49]">{locale === "en" ? "Production progress" : "تقدم الإنتاج"}</p><h2 className="serif mt-2 text-3xl tracking-[-.04em]">{isAssembling ? (locale === "en" ? "One final stitch" : "اللمسة النهائية") : (locale === "en" ? "Building your film" : "جارٍ بناء فيلمك")}</h2></div><span className="text-2xl font-bold tracking-[-.05em] text-[#71472F]">{progress}%</span></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[#EDE4DF]"><div className="h-full rounded-full bg-[#976141] transition-all duration-500" style={{ width: `${progress}%` }} /></div><div className="mt-3 flex items-center justify-between gap-3 text-xs text-[#89807B]"><span>{currentStep}</span><span>{completedShots}/{data.mediaUrls.length} {locale === "en" ? "clips" : "مقاطع"}</span></div><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">{shots.map(shot => <div key={shot.index} className={`rounded-xl border p-2 ${shot.state === "complete" ? "border-[#D9B7A4] bg-[#F7ECE5]" : shot.state === "failed" ? "border-[#E6C4B0] bg-[#FFEFE5]" : shot.state === "rendering" ? "border-[#E4C8B8] bg-[#FFF4ED]" : "border-[#E9E4E1] bg-[#FAF8F7]"}`}><div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-[#E8E2DE]"><img src={shot.sourceUrl} className="h-full w-full object-cover" alt={`${locale === "en" ? "Shot" : "لقطة"} ${shot.index + 1}`} />{shot.state === "complete" && <span className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-[#E9C6B2] text-[#6B422A]"><CheckCircle2 size={12} /></span>}{shot.state === "rendering" && <span className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-[#835338]"><Loader2 size={12} className="animate-spin" /></span>}</div><p className="mt-2 truncate text-[10px] font-bold text-[#65564E]">{shot.roomType}</p><p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[#877F7A]">{shot.prompt}</p></div>)}</div></div>}
