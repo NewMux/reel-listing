@@ -3,6 +3,7 @@
 // private Supabase Storage bucket configured for the Vercel deployment.
 
 import { createClient } from "@supabase/supabase-js";
+import { withRetry } from "@shared/retry";
 import { ENV } from "./_core/env";
 
 const SUPABASE_BUCKET = "reel-listing-media";
@@ -39,10 +40,10 @@ function appendHashSuffix(relKey: string): string {
 async function supabaseStoragePut(relKey: string, data: StorageData, contentType: string, accessToken: string) {
   const key = appendHashSuffix(normalizeKey(relKey));
   const body = typeof data === "string" ? data : new Uint8Array(data);
-  const { error } = await getSupabaseStorageClient(accessToken).storage.from(SUPABASE_BUCKET).upload(key, body, {
-    contentType,
-    upsert: false,
-  });
+  const { error } = await withRetry(
+    () => getSupabaseStorageClient(accessToken).storage.from(SUPABASE_BUCKET).upload(key, body, { contentType, upsert: false }),
+    { label: "Supabase Storage upload" },
+  );
   if (error) throw new Error(`Supabase Storage upload failed: ${error.message}`);
   return { key, url: `/manus-storage/${key}` };
 }
@@ -60,12 +61,11 @@ export async function storagePut(
 
   const target = await storageCreatePutTarget(relKey, accessToken);
   const blob = typeof data === "string" ? new Blob([data], { type: contentType }) : new Blob([data as any]);
-  const uploadResp = await fetch(target.uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": contentType },
-    body: blob,
-  });
-  if (!uploadResp.ok) throw new Error(`Storage upload to S3 failed (${uploadResp.status})`);
+  await withRetry(async () => {
+    const response = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": contentType }, body: blob });
+    if (!response.ok) throw new Error(`Storage upload to S3 failed (${response.status})`);
+    return response;
+  }, { label: "Forge storage upload" });
   return { key: target.key, url: target.url };
 }
 
@@ -73,7 +73,10 @@ export async function storageCreatePutTarget(relKey: string, accessToken?: strin
   if (!hasForgeConfig()) {
     if (!accessToken) throw new Error("Storage config missing: authenticated Supabase Storage access is required.");
     const key = appendHashSuffix(normalizeKey(relKey));
-    const { data, error } = await getSupabaseStorageClient(accessToken).storage.from(SUPABASE_BUCKET).createSignedUploadUrl(key);
+    const { data, error } = await withRetry(
+      () => getSupabaseStorageClient(accessToken).storage.from(SUPABASE_BUCKET).createSignedUploadUrl(key),
+      { label: "Supabase Storage upload signing" },
+    );
     if (error || !data?.signedUrl) throw new Error(`Supabase Storage signing failed: ${error?.message || "empty signed URL"}`);
     return { key, url: `/manus-storage/${key}`, uploadUrl: data.signedUrl };
   }
@@ -82,12 +85,14 @@ export async function storageCreatePutTarget(relKey: string, accessToken?: strin
   const key = appendHashSuffix(normalizeKey(relKey));
   const presignUrl = new URL("v1/storage/presign/put", `${forgeUrl}/`);
   presignUrl.searchParams.set("path", key);
-  const presignResp = await fetch(presignUrl, { headers: { Authorization: `Bearer ${ENV.forgeApiKey}` } });
-  if (!presignResp.ok) {
-    const msg = await presignResp.text().catch(() => presignResp.statusText);
-    throw new Error(`Storage presign failed (${presignResp.status}): ${msg}`);
-  }
-  const { url } = (await presignResp.json()) as { url: string };
+  const { url } = await withRetry(async () => {
+    const response = await fetch(presignUrl, { headers: { Authorization: `Bearer ${ENV.forgeApiKey}` } });
+    if (!response.ok) {
+      const msg = await response.text().catch(() => response.statusText);
+      throw new Error(`Storage presign failed (${response.status}): ${msg}`);
+    }
+    return (await response.json()) as { url: string };
+  }, { label: "Forge storage presign" });
   if (!url) throw new Error("Forge returned empty presign URL");
   return { key, url: `/manus-storage/${key}`, uploadUrl: url };
 }
@@ -97,22 +102,32 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
   return { key, url: `/manus-storage/${key}` };
 }
 
+// This is called concurrently, per photo, on every render-status poll, inside a 10s
+// Vercel function budget shared with the fal.ai calls that follow it -- keep the
+// retry budget tight (short timeout, few retries) rather than reusing generous defaults.
+const SIGN_RETRY_OPTIONS = { retries: 1, baseDelayMs: 250, maxDelayMs: 1_000, timeoutMs: 3_000 } as const;
+
 export async function storageGetSignedUrl(relKey: string, accessToken?: string): Promise<string> {
   const key = normalizeKey(relKey);
   if (!hasForgeConfig()) {
-    const { data, error } = await getSupabaseStorageClient(accessToken).storage.from(SUPABASE_BUCKET).createSignedUrl(key, SIGNED_URL_TTL_SECONDS);
+    const { data, error } = await withRetry(
+      () => getSupabaseStorageClient(accessToken).storage.from(SUPABASE_BUCKET).createSignedUrl(key, SIGNED_URL_TTL_SECONDS),
+      { ...SIGN_RETRY_OPTIONS, label: "Supabase Storage signing" },
+    );
     if (error || !data?.signedUrl) throw new Error(`Supabase Storage signing failed: ${error?.message || "empty signed URL"}`);
     return data.signedUrl;
   }
 
   const forgeUrl = new URL("v1/storage/presign/get", ENV.forgeApiUrl!.replace(/\/+$/, "") + "/");
   forgeUrl.searchParams.set("path", key);
-  const resp = await fetch(forgeUrl, { headers: { Authorization: `Bearer ${ENV.forgeApiKey}` } });
-  if (!resp.ok) {
-    const msg = await resp.text().catch(() => resp.statusText);
-    throw new Error(`Storage signed URL failed (${resp.status}): ${msg}`);
-  }
-  const { url } = (await resp.json()) as { url: string };
+  const { url } = await withRetry(async () => {
+    const response = await fetch(forgeUrl, { headers: { Authorization: `Bearer ${ENV.forgeApiKey}` } });
+    if (!response.ok) {
+      const msg = await response.text().catch(() => response.statusText);
+      throw new Error(`Storage signed URL failed (${response.status}): ${msg}`);
+    }
+    return (await response.json()) as { url: string };
+  }, { ...SIGN_RETRY_OPTIONS, label: "Forge storage signed URL" });
   if (!url) throw new Error("Empty signed URL from backend");
   return url;
 }
