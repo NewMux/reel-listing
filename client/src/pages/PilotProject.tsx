@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Check, Loader2, MapPin, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Loader2, MapPin, Sparkles } from "lucide-react";
 import { useLocation } from "wouter";
 import { AppSidebar } from "@/components/AppChrome";
 import { trpc } from "@/lib/trpc";
@@ -40,6 +40,7 @@ const pilotCopy = {
     number: "Photo",
     apartmentLoaded: "9 photos loaded",
     villaLoaded: "10 photos loaded",
+    alreadySelected: "You already selected all available photos.",
   },
   ar: {
     eyebrow: "معرض تجريبي خاص",
@@ -72,11 +73,12 @@ const pilotCopy = {
     number: "الصورة",
     apartmentLoaded: "تم تحميل 9 صور",
     villaLoaded: "تم تحميل 10 صور",
+    alreadySelected: "لقد اخترت جميع الصور المتاحة بالفعل.",
   },
 } as const;
 
 export default function PilotProject() {
-  const { locale } = useLocale();
+  const { locale, isRtl } = useLocale();
   const t = pilotCopy[locale as PilotLocale] ?? pilotCopy.en;
   const [, setLocation] = useLocation();
   const [gallery, setGallery] = useState<PilotGalleryId>("villa");
@@ -107,7 +109,7 @@ export default function PilotProject() {
     setSelectedIds(current => {
       if (current.includes(id)) return current.filter(item => item !== id);
       if (current.length >= selectionTarget) {
-        setError(locale === "en" ? "You already selected all available photos." : "لقد اخترت جميع الصور المتاحة بالفعل.");
+        setError(t.alreadySelected);
         return current;
       }
       return [...current, id];
@@ -143,7 +145,7 @@ export default function PilotProject() {
   return (
     <AppSidebar>
       <main className="mx-auto max-w-[1260px] px-5 py-8 sm:px-8 lg:px-10 lg:py-12">
-        <button onClick={() => setLocation("/dashboard")} className="inline-flex items-center gap-2 text-sm font-semibold text-[#756A63] transition hover:text-[#251811]"><ArrowLeft size={16} />{t.back}</button>
+        <button onClick={() => setLocation("/dashboard")} className="inline-flex items-center gap-2 text-sm font-semibold text-[#756A63] transition hover:text-[#251811]">{isRtl ? <ArrowRight size={16} /> : <ArrowLeft size={16} />}{t.back}</button>
 
         <div className="mt-8 grid gap-10 lg:grid-cols-[.72fr_1.28fr] lg:items-start">
           <div className="lg:sticky lg:top-8">
@@ -174,9 +176,9 @@ export default function PilotProject() {
                 return <div key={image.id} className={`group relative overflow-hidden rounded-xl border ${isSelected ? "border-[#935C3C] ring-2 ring-[#E9C6B2]" : "border-[#251811]/10"}`}>
                   <button type="button" onClick={() => toggleSelected(image.id)} aria-pressed={isSelected} className="relative block aspect-[4/3] w-full cursor-pointer overflow-hidden bg-[#F1ECE9] text-start outline-none focus-visible:ring-2 focus-visible:ring-[#8D583A]">
                     <img src={image.url} className={`h-full w-full object-cover transition ${isSelected ? "brightness-[.78]" : "group-hover:scale-[1.03]"}`} alt={`${t.number} ${index + 1}`} />
-                    <span className="absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-[#251811]/80 text-[10px] font-bold text-white">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="absolute start-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-[#251811]/80 text-[10px] font-bold text-white">{String(index + 1).padStart(2, "0")}</span>
                     {isSelected && <span className="absolute inset-0 grid place-items-center"><span className="grid h-9 w-9 place-items-center rounded-full bg-[#E9C6B2] text-[#5B3118] shadow-lg"><Check size={19} /></span></span>}
-                    {isSelected && <span className="absolute bottom-1.5 left-1.5 rounded-md bg-[#251811]/85 px-1.5 py-1 text-[10px] font-bold text-white">{rank + 1}</span>}
+                    {isSelected && <span className="absolute bottom-1.5 start-1.5 rounded-md bg-[#251811]/85 px-1.5 py-1 text-[10px] font-bold text-white">{rank + 1}</span>}
                   </button>
                 </div>;
               })}
