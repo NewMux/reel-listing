@@ -6,7 +6,7 @@ import { AUTH_UNAVAILABLE_ERR_MSG, COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { createVideoProject, getVideoProject, insertContactMessage, listVideoProjects, updateVideoProject } from "./db";
+import { createVideoProject, decrementVideoQuota, getVideoProject, incrementVideoQuota, insertContactMessage, listVideoProjects, updateVideoProject } from "./db";
 import {
   getApprovalTransition,
   getChangeRequestTransition,
@@ -170,10 +170,19 @@ export const appRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
       try {
         const transition = getApprovalTransition(project.status);
-        const render = await submitFalRender(ctx.user.id, project, ctx.supabaseAccessToken);
-        const updated = await updateVideoProject(ctx.user.id, input.id, transition);
-        if (!updated) throw new Error("The project could not be updated after rendering started.");
-        return { project: await presentProject(updated, ctx.supabaseAccessToken), render: await presentRender(render, project, ctx.supabaseAccessToken) };
+        const remaining = await decrementVideoQuota(ctx.user.id);
+        if (remaining === null) {
+          throw new Error("You've used all of your included videos. Contact us to add more before rendering another reel.");
+        }
+        try {
+          const render = await submitFalRender(ctx.user.id, project, ctx.supabaseAccessToken);
+          const updated = await updateVideoProject(ctx.user.id, input.id, transition);
+          if (!updated) throw new Error("The project could not be updated after rendering started.");
+          return { project: await presentProject(updated, ctx.supabaseAccessToken), render: await presentRender(render, project, ctx.supabaseAccessToken) };
+        } catch (renderError) {
+          await incrementVideoQuota(ctx.user.id).catch(() => {});
+          throw renderError;
+        }
       } catch (error) {
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to start fal.ai rendering." });
       }
