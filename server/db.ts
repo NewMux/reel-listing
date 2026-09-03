@@ -91,6 +91,24 @@ export async function getVideoProject(userId: number, projectId: number) {
   return result[0];
 }
 
+/** Finds the in-progress project a fal.ai request_id belongs to, for webhook-triggered refreshes that have no user session to scope the lookup by. */
+export async function getVideoProjectByRequestId(requestId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const idJson = JSON.stringify([requestId]);
+  const result = await db
+    .select()
+    .from(videoProjects)
+    .where(
+      and(
+        eq(videoProjects.status, "Processing"),
+        sql`(${videoProjects.promptRequestIds} @> ${idJson}::jsonb OR ${videoProjects.falRequestIds} @> ${idJson}::jsonb)`,
+      ),
+    )
+    .limit(1);
+  return result[0];
+}
+
 export async function createVideoProject(project: InsertVideoProject) {
   const db = await getDb();
   if (!db) throw new Error("Project storage is temporarily unavailable.");

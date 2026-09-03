@@ -133,6 +133,12 @@ function getFalClient() {
   return fal;
 }
 
+// Lets fal.ai notify us the instant a job finishes instead of only ever finding out on the
+// next client poll -- keeps a render moving even if the customer closes the tab mid-generation.
+// The webhook handler treats this purely as a "go re-check now" hint (see server/_core/webhooks.ts);
+// it never trusts the webhook body itself, so this URL doesn't need to be a secret.
+const FAL_WEBHOOK_URL = `${ENV.publicUrl.replace(/\/+$/, "")}/api/webhooks/fal`;
+
 function propertyContext(project: VideoProject) {
   return [project.title, project.location, project.description].filter(Boolean).join(". ") || "high-end property listing";
 }
@@ -201,6 +207,7 @@ async function submitVisionPromptJobs(client: typeof fal, signedImages: string[]
       temperature: 0.2,
       max_tokens: 220,
     },
+    webhookUrl: FAL_WEBHOOK_URL,
   })));
   return responses.map(response => response.request_id);
 }
@@ -215,6 +222,7 @@ async function submitVideoJobs(client: typeof fal, signedImages: string[], promp
       negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, generic left-to-right pan, slideshow motion, static frame, visual step change, object reveal, lighting change, before-and-after effect, artificial light bloom, blur, distort, low quality, audio, voice, dialogue, music, people, animals, text, logo, watermark",
       cfg_scale: 0.5,
     },
+    webhookUrl: FAL_WEBHOOK_URL,
   })));
   return responses.map(response => response.request_id);
 }
@@ -252,9 +260,6 @@ export async function submitFalRender(userId: number, project: VideoProject, acc
 export async function refreshFalRender(userId: number, project: VideoProject, accessToken?: string | null): Promise<RenderStatusSnapshot> {
   const promptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
   const generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
-  const signedImages = project.mediaKeys.length === project.mediaUrls.length
-    ? await getFalSourceUrls(project, accessToken)
-    : [];
   const client = getFalClient();
   let failedMessage: string | null = null;
 
@@ -293,6 +298,9 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
   const clipUrls = asStringArray(project.clipUrls, project.mediaUrls.length);
 
   if (!allReady(requestIds, project.mediaUrls.length)) {
+    const signedImages = project.mediaKeys.length === project.mediaUrls.length
+      ? await getFalSourceUrls(project, accessToken)
+      : [];
     if (!signedImages.length) throw new Error("Property images could not be prepared for fal.ai.");
     requestIds = await submitVideoJobs(client, signedImages, prompts);
     await updateVideoProject(userId, project.id, {
