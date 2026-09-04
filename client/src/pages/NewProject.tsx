@@ -165,7 +165,7 @@ export default function NewProject() {
               </div>
               <div className="mt-5 flex items-center gap-2 text-xs font-bold text-[#71472F]">
                 <Check size={15} />
-                {locale === "en" ? "Your upload order is preserved in the final edit" : "سيتم الحفاظ على ترتيب الصور في المونتاج النهائي"}
+                {locale === "en" ? "You'll be able to arrange the final sequence before it renders" : "ستتمكن من ترتيب التسلسل النهائي قبل بدء التصيير"}
               </div>
             </div>
           </div>

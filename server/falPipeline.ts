@@ -15,11 +15,12 @@ import { updateVideoProject } from "./db";
 
 const VISION_SYSTEM_PROMPT = [
   "You are the shot designer for a premium architectural real-estate film.",
-  "Analyze only the attached property photo and return one JSON object with exactly these string keys: shotType, confidence, cameraMove, lighting, focus.",
+  "Analyze only the attached property photo and return one JSON object with exactly these string keys: shotType, confidence, timeOfDay, cameraMove, lighting, focus.",
   "shotType must be one of: outdoor-view, living-room, kitchen-dining, bedroom, bathroom, detail, unknown.",
   "confidence must be one of: high, medium, low. Use low whenever the room type is not clearly supported by visible evidence.",
+  "timeOfDay must be one of: morning, midday, afternoon, evening, night, unknown. Infer it only from visible cues such as sky tone, shadow length, window light color, or interior artificial lighting. Use unknown whenever the photo has no reliable time-of-day evidence, such as an interior shot with no visible windows or sky.",
   "cameraMove must describe one restrained, physically plausible ten-second eye-level move using a grounded gimbal, dolly, slider, or shallow arc, and must follow the required movement assignment in the user prompt.",
-  "lighting must describe only light behavior visible or safely implied by the reference image.",
+  "lighting must describe only light behavior visible or safely implied by the reference image, and must remain consistent with the detected timeOfDay.",
   "focus must name one visible architectural or lifestyle feature without inventing anything.",
   "Never claim a room or object that is not clearly visible. If uncertain, use unknown and neutral language.",
   "Never choose a crane, lift, drop, tilt, overhead, drone, low-to-high angle, high-to-low angle, orbit, spin, or floating camera move. Return JSON only. No markdown, title, explanation, or extra keys.",
@@ -87,29 +88,42 @@ function normalizeShotType(value: unknown, confidence: string) {
   return "unknown";
 }
 
+function normalizeTimeOfDay(value: unknown) {
+  const text = typeof value === "string" ? value.toLowerCase() : "";
+  if (text.includes("morning") || text.includes("sunrise") || text.includes("dawn")) return "morning";
+  if (text.includes("midday") || text.includes("noon")) return "midday";
+  if (text.includes("afternoon")) return "afternoon";
+  if (text.includes("evening") || text.includes("dusk") || text.includes("sunset") || text.includes("golden hour")) return "evening";
+  if (text.includes("night")) return "night";
+  return "unknown";
+}
+
 function fallbackDirection(index: number) {
   const directions = [
-    { shotType: "outdoor-view", cameraMove: MOVEMENT_DIRECTIVES[0], lighting: "sunlight remains natural and stable while highlights on the water or glass shimmer subtly", focus: "the strongest view and the relationship between the terrace edge and the horizon" },
-    { shotType: "living-room", cameraMove: MOVEMENT_DIRECTIVES[1], lighting: "soft daylight falls naturally through the glazing with gentle shadow continuity", focus: "the room’s main seating composition and its strongest architectural sightline" },
-    { shotType: "kitchen-dining", cameraMove: MOVEMENT_DIRECTIVES[2], lighting: "warm practical light and ambient daylight remain balanced without changing the room’s exposure", focus: "the material contrast, joinery, and connection between kitchen and dining areas" },
-    { shotType: "bedroom", cameraMove: MOVEMENT_DIRECTIVES[3], lighting: "natural light gently shifts across the floor and fabric while the room remains evenly exposed", focus: "the bed, primary wall, and the room’s sense of calm and openness" },
-    { shotType: "bathroom", cameraMove: MOVEMENT_DIRECTIVES[4], lighting: "warm architectural lighting creates restrained specular movement across the stone and metal finishes", focus: "the vanity, mirrors, and premium material details" },
-    { shotType: "detail", cameraMove: MOVEMENT_DIRECTIVES[5], lighting: "the visible light remains stable with gentle tonal continuity", focus: "the strongest visible finish or architectural detail" },
-    { shotType: "living-room", cameraMove: MOVEMENT_DIRECTIVES[6], lighting: "soft daylight remains consistent across the visible surfaces", focus: "the nearest visible material and its relationship to the room" },
-    { shotType: "kitchen-dining", cameraMove: MOVEMENT_DIRECTIVES[7], lighting: "ambient daylight and practical light remain balanced and unchanged", focus: "the strongest visible sightline through the space" },
-    { shotType: "outdoor-view", cameraMove: MOVEMENT_DIRECTIVES[8], lighting: "the natural exterior light remains stable with restrained highlight movement", focus: "the brightest opening and the view beyond it" },
-    { shotType: "detail", cameraMove: MOVEMENT_DIRECTIVES[9], lighting: "the visible light remains stable across the material surface", focus: "the most important visible material detail" },
+    { shotType: "outdoor-view", timeOfDay: "unknown", cameraMove: MOVEMENT_DIRECTIVES[0], lighting: "sunlight remains natural and stable while highlights on the water or glass shimmer subtly", focus: "the strongest view and the relationship between the terrace edge and the horizon" },
+    { shotType: "living-room", timeOfDay: "unknown", cameraMove: MOVEMENT_DIRECTIVES[1], lighting: "soft daylight falls naturally through the glazing with gentle shadow continuity", focus: "the room’s main seating composition and its strongest architectural sightline" },
+    { shotType: "kitchen-dining", timeOfDay: "unknown", cameraMove: MOVEMENT_DIRECTIVES[2], lighting: "warm practical light and ambient daylight remain balanced without changing the room’s exposure", focus: "the material contrast, joinery, and connection between kitchen and dining areas" },
+    { shotType: "bedroom", timeOfDay: "unknown", cameraMove: MOVEMENT_DIRECTIVES[3], lighting: "natural light gently shifts across the floor and fabric while the room remains evenly exposed", focus: "the bed, primary wall, and the room’s sense of calm and openness" },
+    { shotType: "bathroom", timeOfDay: "unknown", cameraMove: MOVEMENT_DIRECTIVES[4], lighting: "warm architectural lighting creates restrained specular movement across the stone and metal finishes", focus: "the vanity, mirrors, and premium material details" },
+    { shotType: "detail", timeOfDay: "unknown", cameraMove: MOVEMENT_DIRECTIVES[5], lighting: "the visible light remains stable with gentle tonal continuity", focus: "the strongest visible finish or architectural detail" },
+    { shotType: "living-room", timeOfDay: "unknown", cameraMove: MOVEMENT_DIRECTIVES[6], lighting: "soft daylight remains consistent across the visible surfaces", focus: "the nearest visible material and its relationship to the room" },
+    { shotType: "kitchen-dining", timeOfDay: "unknown", cameraMove: MOVEMENT_DIRECTIVES[7], lighting: "ambient daylight and practical light remain balanced and unchanged", focus: "the strongest visible sightline through the space" },
+    { shotType: "outdoor-view", timeOfDay: "unknown", cameraMove: MOVEMENT_DIRECTIVES[8], lighting: "the natural exterior light remains stable with restrained highlight movement", focus: "the brightest opening and the view beyond it" },
+    { shotType: "detail", timeOfDay: "unknown", cameraMove: MOVEMENT_DIRECTIVES[9], lighting: "the visible light remains stable across the material surface", focus: "the most important visible material detail" },
   ];
   return directions[index % directions.length];
 }
 
-export function buildCinematicPrompt(index: number, direction: { shotType: string; cameraMove: string; lighting: string; focus: string }, project: VideoProject) {
+export function buildCinematicPrompt(index: number, direction: { shotType: string; timeOfDay: string; cameraMove: string; lighting: string; focus: string }, project: VideoProject) {
   const cameraMove = compactDirection(direction.cameraMove, 220);
   const lighting = compactDirection(direction.lighting, 140);
   const focus = compactDirection(direction.focus, 140);
   return limitPrompt([
     CINEMATIC_LOCK,
     `Shot type: ${direction.shotType}. Classification confidence is conservative; if the room is not clearly visible, treat it as a property detail rather than guessing.`,
+    direction.timeOfDay === "unknown"
+      ? "Time of day is not clearly evident from the photo; keep the lighting exactly as shown without implying a specific time of day."
+      : `Time of day: ${direction.timeOfDay}. Preserve the natural lighting condition of this time of day throughout the shot; do not introduce artificial day-to-night, night-to-day, or golden-hour transitions that are not already present in the photo.`,
     `Required movement variation for this shot: ${movementDirective(index)}. Use this movement family and do not repeat a generic lateral pan.`,
     `Camera choreography: ${cameraMove}.`,
     `Light behavior: ${lighting}.`,
@@ -168,10 +182,11 @@ function normalizeDirection(value: unknown, index: number, project: VideoProject
   if (typeof output !== "string") return buildCinematicPrompt(index, fallback, project);
   const cleaned = output.replace(/^```(?:json|text)?\s*/i, "").replace(/\s*```$/i, "").trim();
   try {
-    const parsed = JSON.parse(cleaned) as { shotType?: unknown; confidence?: unknown; cameraMove?: unknown; lighting?: unknown; focus?: unknown };
+    const parsed = JSON.parse(cleaned) as { shotType?: unknown; confidence?: unknown; timeOfDay?: unknown; cameraMove?: unknown; lighting?: unknown; focus?: unknown };
     const confidence = normalizeConfidence(parsed.confidence);
     const direction = {
       shotType: normalizeShotType(parsed.shotType, confidence),
+      timeOfDay: normalizeTimeOfDay(parsed.timeOfDay),
       cameraMove: cleanDirection(parsed.cameraMove, fallback.cameraMove),
       lighting: cleanDirection(parsed.lighting, fallback.lighting),
       focus: cleanDirection(parsed.focus, fallback.focus),
@@ -205,7 +220,7 @@ async function submitVisionPromptJobs(client: typeof fal, signedImages: string[]
       system_prompt: VISION_SYSTEM_PROMPT,
       model: FAL_VISION_LLM_MODEL,
       temperature: 0.2,
-      max_tokens: 220,
+      max_tokens: 260,
     },
     webhookUrl: FAL_WEBHOOK_URL,
   })));
