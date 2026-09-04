@@ -1,12 +1,23 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getPilotGallery, pilotGalleryIds } from "../shared/pilotGalleries";
-import { MAX_PROPERTY_MEDIA_BYTES, MAX_PROPERTY_PHOTOS } from "../shared/video";
+import { MAX_PROPERTY_MEDIA_BYTES, MAX_PROPERTY_PHOTOS, STAGING_STYLES } from "../shared/video";
 import { AUTH_UNAVAILABLE_ERR_MSG, COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { createVideoProject, decrementVideoQuota, getVideoProject, incrementVideoQuota, insertContactMessage, listVideoProjects, updateVideoProject } from "./db";
+import {
+  createVideoProject,
+  decrementStagingCredits,
+  decrementVideoQuota,
+  getVideoProject,
+  incrementStagingCredits,
+  incrementVideoQuota,
+  insertContactMessage,
+  listVideoProjects,
+  updateVideoProject,
+} from "./db";
+import { stagePhoto } from "./stagingPipeline";
 import {
   getApprovalTransition,
   getChangeRequestTransition,
@@ -213,6 +224,42 @@ export const appRouter = router({
           return presentProject(updated, ctx.supabaseAccessToken);
         } catch (error) {
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to reorder these photos." });
+        }
+      }),
+    stagePhoto: protectedProcedure
+      .input(z.object({ id: z.number().int().positive(), index: z.number().int().nonnegative(), style: z.enum(STAGING_STYLES) }))
+      .mutation(async ({ ctx, input }) => {
+        projectIdInput(input.id);
+        const project = await getVideoProject(ctx.user.id, input.id);
+        if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+        try {
+          if (project.status !== "Review") {
+            throw new Error("Photos can only be staged before production starts.");
+          }
+          if (input.index >= project.mediaUrls.length) {
+            throw new Error("Invalid photo.");
+          }
+          const remaining = await decrementStagingCredits(ctx.user.id);
+          if (remaining === null) {
+            throw new Error("You've used all of your staging credits. Contact us to add more.");
+          }
+          try {
+            const staged = await stagePhoto(ctx.user.id, project, input.index, input.style, ctx.supabaseAccessToken);
+            const mediaUrls = [...project.mediaUrls];
+            const mediaKeys = [...project.mediaKeys];
+            const mediaTypes = [...project.mediaTypes];
+            mediaUrls[input.index] = staged.url;
+            mediaKeys[input.index] = staged.key;
+            mediaTypes[input.index] = staged.type;
+            const updated = await updateVideoProject(ctx.user.id, input.id, { mediaUrls, mediaKeys, mediaTypes });
+            if (!updated) throw new Error("The project could not be updated.");
+            return presentProject(updated, ctx.supabaseAccessToken);
+          } catch (stagingError) {
+            await incrementStagingCredits(ctx.user.id).catch(() => {});
+            throw stagingError;
+          }
+        } catch (error) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to stage this photo." });
         }
       }),
     requestChanges: protectedProcedure
