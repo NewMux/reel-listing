@@ -203,7 +203,7 @@ export default function NewProject() {
                     <div className="relative aspect-[4/3]">
                       <img src={item.preview} className="h-full w-full object-cover" alt={`Property photo ${index + 1}`} />
                       <span className="absolute left-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-[#251811]/75 text-[10px] font-bold text-white">{String(index + 1).padStart(2, "0")}</span>
-                      <button onClick={event => { event.stopPropagation(); removeFile(index); }} className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-[#251811]/75 text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100" aria-label={`${t.upload.remove} ${index + 1}`}>
+                      <button onClick={event => { event.stopPropagation(); removeFile(index); }} className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-[#251811]/75 text-white opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:focus:opacity-100" aria-label={`${t.upload.remove} ${index + 1}`}>
                         <X size={13} />
                       </button>
                     </div>
