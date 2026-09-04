@@ -18,6 +18,7 @@ import {
   updateVideoProject,
 } from "./db";
 import { stagePhoto } from "./stagingPipeline";
+import { checkRateLimit } from "./rateLimit";
 import {
   getApprovalTransition,
   getChangeRequestTransition,
@@ -44,6 +45,12 @@ function projectIdInput(id: number) {
 
 function isPilotMediaKey(key: string) {
   return key.startsWith("pilot:");
+}
+
+function clientIp(req: { headers: Record<string, string | string[] | undefined>; socket: { remoteAddress?: string } }) {
+  const forwarded = req.headers["x-forwarded-for"];
+  const first = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(",")[0];
+  return first?.trim() || req.socket.remoteAddress || "unknown";
 }
 
 async function presentSourceUrls(project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null) {
@@ -93,10 +100,15 @@ export const appRouter = router({
           message: z.string().trim().min(1).max(4_000),
         }),
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        const { allowed } = await checkRateLimit(`contact:${clientIp(ctx.req)}`);
+        if (!allowed) {
+          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many messages sent. Please try again later." });
+        }
         try {
           await insertContactMessage(input);
         } catch (error) {
+          console.error("[Contact] Failed to save message:", error);
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
             message: error instanceof Error ? error.message : "Unable to send your message.",
@@ -141,6 +153,7 @@ export const appRouter = router({
           });
           return { id };
         } catch (error) {
+          console.error("[Projects] create failed:", error);
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: error instanceof Error ? error.message : "Unable to create this project.",
@@ -195,6 +208,7 @@ export const appRouter = router({
           throw renderError;
         }
       } catch (error) {
+        console.error(`[Projects] approve failed for project ${input.id}:`, error);
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to start fal.ai rendering." });
       }
     }),
@@ -223,6 +237,7 @@ export const appRouter = router({
           if (!updated) throw new Error("The project could not be updated.");
           return presentProject(updated, ctx.supabaseAccessToken);
         } catch (error) {
+          console.error(`[Projects] reorder failed for project ${input.id}:`, error);
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to reorder these photos." });
         }
       }),
@@ -259,6 +274,7 @@ export const appRouter = router({
             throw stagingError;
           }
         } catch (error) {
+          console.error(`[Projects] stagePhoto failed for project ${input.id}, index ${input.index}:`, error);
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to stage this photo." });
         }
       }),
@@ -271,6 +287,7 @@ export const appRouter = router({
         try {
           return updateVideoProject(ctx.user.id, input.id, getChangeRequestTransition(input.notes));
         } catch (error) {
+          console.error(`[Projects] requestChanges failed for project ${input.id}:`, error);
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to save changes." });
         }
       }),
@@ -284,6 +301,7 @@ export const appRouter = router({
           try {
             return await presentRender(await refreshFalRender(ctx.user.id, project, ctx.supabaseAccessToken), project, ctx.supabaseAccessToken);
           } catch (error) {
+            console.error(`[Projects] renderStatus refresh failed for project ${input.id}:`, error);
             throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to refresh fal.ai rendering." });
           }
         }
@@ -304,6 +322,7 @@ export const appRouter = router({
           }
           return updateVideoProject(ctx.user.id, input.id, { ...getCompletionTransition(input.finalVideoUrl), renderProgress: 100, renderPhase: "complete", renderError: null });
         } catch (error) {
+          console.error(`[Projects] complete failed for project ${input.id}:`, error);
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to complete this project." });
         }
       }),
@@ -315,6 +334,7 @@ export const appRouter = router({
         try {
           return createUploadSession(ctx.user.id, input.name, input.type, input.totalBytes, ctx.supabaseAccessToken);
         } catch (error) {
+          console.error("[Media] createUploadSession failed:", error);
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to prepare upload." });
         }
       }),
@@ -324,6 +344,7 @@ export const appRouter = router({
         try {
           return appendUploadChunk(ctx.user.id, input.uploadId, input.chunk);
         } catch (error) {
+          console.error("[Media] appendUploadChunk failed:", error);
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to upload this part." });
         }
       }),
@@ -333,6 +354,7 @@ export const appRouter = router({
         try {
           return await finalizeUploadSession(ctx.user.id, input.uploadId);
         } catch (error) {
+          console.error("[Media] finalizeUploadSession failed:", error);
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to secure this media." });
         }
       }),
