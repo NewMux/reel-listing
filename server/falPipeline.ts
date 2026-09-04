@@ -292,6 +292,7 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
           failedMessage = `fal.ai could not create direction for photo ${index + 1}.`;
         }
       } catch (error) {
+        console.error(`[FalPipeline] vision prompt poll failed for project ${project.id}, photo ${index + 1}:`, error);
         failedMessage = error instanceof Error ? error.message : `fal.ai could not create direction for photo ${index + 1}.`;
       }
     }));
@@ -343,6 +344,7 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
         failedMessage = `fal.ai could not render photo ${index + 1}.`;
       }
     } catch (error) {
+      console.error(`[FalPipeline] video render poll failed for project ${project.id}, photo ${index + 1}:`, error);
       failedMessage = error instanceof Error ? error.message : `fal.ai could not render photo ${index + 1}.`;
     }
   }));

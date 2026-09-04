@@ -44,7 +44,11 @@ export const videoProjects = pgTable(
     createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
   },
-  table => [index("video_projects_user_idx").on(table.userId)],
+  table => [
+    index("video_projects_user_idx").on(table.userId),
+    index("video_projects_prompt_request_ids_gin_idx").using("gin", table.promptRequestIds),
+    index("video_projects_fal_request_ids_gin_idx").using("gin", table.falRequestIds),
+  ],
 );
 
 export const contactMessages = pgTable("contact_messages", {
