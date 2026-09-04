@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, ArrowLeft, ArrowRight, Check, Clock3, Loader2, MessageSquareText, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Clock3, Loader2, MessageSquareText, Sparkles } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
 import { AppSidebar, StatusPill } from "@/components/AppChrome";
 import { copy, useLocale } from "@/lib/locale";
@@ -42,6 +42,9 @@ export default function ProjectReview() {
       setShowNotes(false);
     },
   });
+  const reorder = trpc.projects.reorder.useMutation({
+    onSuccess: () => utils.projects.get.invalidate({ id }),
+  });
 
   if (project.isLoading) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.loading}</div></AppSidebar>;
   if (!project.data) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.projectNotFound}</div></AppSidebar>;
@@ -50,6 +53,14 @@ export default function ProjectReview() {
   const prompts = shotPrompts[locale];
   const clipCount = data.mediaUrls.length;
   const duration = clipCount * FAL_CLIP_SECONDS;
+  const canReorder = data.status === "Review";
+  const moveShot = (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (!canReorder || reorder.isPending || nextIndex < 0 || nextIndex >= data.mediaUrls.length) return;
+    const order = data.mediaUrls.map((_, i) => i);
+    [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
+    reorder.mutate({ id, order });
+  };
 
   return (
     <AppSidebar>
@@ -77,7 +88,7 @@ export default function ProjectReview() {
               {data.mediaUrls.map((url, index) => (
                 <div key={url} className="group overflow-hidden rounded-2xl border border-[#251811]/10 bg-[#F6F2EF]">
                   <div className="relative aspect-[4/3] overflow-hidden"><img src={url} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" alt={`${t.review.photoAlt} ${index + 1}`} /><span className="absolute start-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-[#251811]/75 text-[10px] font-bold text-white">{String(index + 1).padStart(2, "0")}</span></div>
-                  <div className="p-3"><p className="truncate text-xs font-bold text-[#4C3B31]">{names[index] || `${t.review.shotFallback} ${index + 1}`}</p><p className="mt-1 text-[10px] font-medium text-[#948D89]">{prompts[index] || prompts[index % prompts.length]}</p></div>
+                  <div className="p-3"><p className="truncate text-xs font-bold text-[#4C3B31]">{names[index] || `${t.review.shotFallback} ${index + 1}`}</p><p className="mt-1 text-[10px] font-medium text-[#948D89]">{prompts[index] || prompts[index % prompts.length]}</p>{canReorder && <div className="mt-2 flex gap-1"><button type="button" disabled={index === 0 || reorder.isPending} onClick={() => moveShot(index, -1)} className="grid h-7 w-7 place-items-center rounded-lg border border-[#251811]/10 text-[#705F55] disabled:opacity-25" aria-label={`${t.review.moveUp} ${index + 1}`}><ArrowUp size={13} /></button><button type="button" disabled={index === data.mediaUrls.length - 1 || reorder.isPending} onClick={() => moveShot(index, 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-[#251811]/10 text-[#705F55] disabled:opacity-25" aria-label={`${t.review.moveDown} ${index + 1}`}><ArrowDown size={13} /></button></div>}</div>
                 </div>
               ))}
             </div>

@@ -187,6 +187,34 @@ export const appRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to start fal.ai rendering." });
       }
     }),
+    reorder: protectedProcedure
+      .input(z.object({ id: z.number().int().positive(), order: z.array(z.number().int().nonnegative()).min(1).max(MAX_PROPERTY_PHOTOS) }))
+      .mutation(async ({ ctx, input }) => {
+        projectIdInput(input.id);
+        const project = await getVideoProject(ctx.user.id, input.id);
+        if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+        try {
+          if (project.status !== "Review") {
+            throw new Error("Photo order can only be changed before production starts.");
+          }
+          const length = project.mediaUrls.length;
+          const isPermutation = input.order.length === length && new Set(input.order).size === length && input.order.every(index => index < length);
+          if (!isPermutation) {
+            throw new Error("Invalid photo order.");
+          }
+          const reindex = <T,>(values: T[]) => input.order.map(index => values[index]);
+          const updated = await updateVideoProject(ctx.user.id, input.id, {
+            mediaUrls: reindex(project.mediaUrls),
+            mediaKeys: reindex(project.mediaKeys),
+            mediaNames: reindex(project.mediaNames),
+            mediaTypes: reindex(project.mediaTypes),
+          });
+          if (!updated) throw new Error("The project could not be updated.");
+          return presentProject(updated, ctx.supabaseAccessToken);
+        } catch (error) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to reorder these photos." });
+        }
+      }),
     requestChanges: protectedProcedure
       .input(z.object({ id: z.number().int().positive(), notes: z.string().trim().min(3).max(1_000) }))
       .mutation(async ({ ctx, input }) => {
