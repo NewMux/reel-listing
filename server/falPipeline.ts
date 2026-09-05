@@ -20,7 +20,6 @@ const VISION_SYSTEM_PROMPT = [
   "confidence must be one of: high, medium, low. Use low whenever the room type is not clearly supported by visible evidence.",
   "timeOfDay must be one of: morning, midday, afternoon, evening, night, unknown. Infer it only from visible cues such as sky tone, shadow length, window light color, or interior artificial lighting. Use unknown whenever the photo has no reliable time-of-day evidence, such as an interior shot with no visible windows or sky.",
   "cameraMove must describe one restrained, physically plausible ten-second eye-level move using a grounded gimbal, dolly, slider, or shallow arc, and must follow the required movement assignment in the user prompt.",
-  "Unless shotType is outdoor-view, the move must stay committed to the interior space: never describe the camera traveling toward, through, or out a window, glass door, or mirror, even if it is the brightest or most visually prominent feature in the photo.",
   "lighting must describe only light behavior visible or safely implied by the reference image, and must remain consistent with the detected timeOfDay.",
   "focus must name one visible architectural or lifestyle feature without inventing anything.",
   "Never claim a room or object that is not clearly visible. If uncertain, use unknown and neutral language.",
@@ -28,7 +27,7 @@ const VISION_SYSTEM_PROMPT = [
 ].join(" ");
 
 const MOVEMENT_DIRECTIVES = [
-  "a forward gimbal push that follows the room’s strongest interior depth line while staying inside the space, stopping short of any window or exterior opening",
+  "a forward gimbal push toward the strongest depth line",
   "a smooth lateral gimbal track that creates clear foreground-to-background parallax",
   "a measured diagonal gimbal move that travels across the room’s main perspective",
   "a gentle gimbal arc around the dominant architectural feature while keeping verticals straight",
@@ -36,7 +35,7 @@ const MOVEMENT_DIRECTIVES = [
   "a slow backward gimbal pull at constant height that reveals more context while preserving the exact composition",
   "a precise side-to-side gimbal glide past the nearest visible foreground edge",
   "a calm horizontal corner-to-corner gimbal travel at constant height that follows the strongest sightline",
-  "a subtle forward-and-lateral gimbal drift across the room toward its brightest interior feature, stopping short of any window or exterior opening",
+  "a subtle forward-and-lateral gimbal drift toward the brightest visible opening",
   "a short eye-level dolly move toward the nearest visible material plane",
 ] as const;
 
@@ -126,9 +125,6 @@ export function buildCinematicPrompt(index: number, direction: { shotType: strin
       ? "Time of day is not clearly evident from the photo; keep the lighting exactly as shown without implying a specific time of day."
       : `Time of day: ${direction.timeOfDay}. Preserve the natural lighting condition of this time of day throughout the shot; do not introduce artificial day-to-night, night-to-day, or golden-hour transitions that are not already present in the photo.`,
     `Required movement variation for this shot: ${movementDirective(index)}. Use this movement family and do not repeat a generic lateral pan.`,
-    direction.shotType === "outdoor-view"
-      ? "The window, glazing, or open view may be part of the composition and the natural destination of the movement."
-      : "Stay committed to this interior room for the full ten seconds: never travel toward, through, or out a window, glass door, or mirror, even if it is the brightest or most prominent feature in the photo. Keep the room's furniture and layout in frame throughout.",
     `Camera choreography: ${cameraMove}.`,
     `Light behavior: ${lighting}.`,
     `Visual focus: ${focus}.`,
