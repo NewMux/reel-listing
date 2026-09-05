@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { AlertCircle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Clock3, Loader2, MessageSquareText, Sparkles, Wand2 } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Clock3, Loader2, MessageSquareText, Sparkles } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
 import { AppSidebar, StatusPill } from "@/components/AppChrome";
-import { useAuth } from "@/_core/hooks/useAuth";
 import { copy, useLocale } from "@/lib/locale";
 import { trpc } from "@/lib/trpc";
-import { FAL_CLIP_SECONDS, STAGING_STYLES, type StagingStyle } from "@shared/video";
+import { FAL_CLIP_SECONDS } from "@shared/video";
 
 const shotNames = {
   en: ["Hero view", "Living space", "Kitchen detail", "Dining moment", "Primary suite", "Bath detail", "Outdoor living", "The view", "Architecture", "Closing frame"],
@@ -26,10 +25,6 @@ export default function ProjectReview() {
   const [notes, setNotes] = useState("");
   const [showNotes, setShowNotes] = useState(false);
   const [approveError, setApproveError] = useState("");
-  const [stagingStyle, setStagingStyle] = useState<Record<number, StagingStyle>>({});
-  const [stagedStyles, setStagedStyles] = useState<Record<number, StagingStyle>>({});
-  const [stagingError, setStagingError] = useState("");
-  const { user } = useAuth();
   const project = trpc.projects.get.useQuery({ id }, { enabled: Number.isSafeInteger(id) });
   const utils = trpc.useUtils();
   const approve = trpc.projects.approve.useMutation({
@@ -49,15 +44,6 @@ export default function ProjectReview() {
   });
   const reorder = trpc.projects.reorder.useMutation({
     onSuccess: () => utils.projects.get.invalidate({ id }),
-  });
-  const stage = trpc.projects.stagePhoto.useMutation({
-    onSuccess: (_project, variables) => {
-      utils.projects.get.invalidate({ id });
-      utils.auth.me.invalidate();
-      setStagedStyles(current => ({ ...current, [variables.index]: variables.style }));
-      setStagingError("");
-    },
-    onError: err => setStagingError(err.message),
   });
 
   if (project.isLoading) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.loading}</div></AppSidebar>;
@@ -96,14 +82,13 @@ export default function ProjectReview() {
           </div>
 
           <div className="rounded-[27px] border border-[#251811]/10 bg-white p-5 shadow-[0_16px_40px_rgba(17,37,30,.05)] sm:p-7">
-            <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-sm font-bold text-[#402F25]">{t.review.storyboard}</h2><p className="mt-1 max-w-lg text-xs leading-5 text-[#817975]">{t.review.storyboardBody}</p></div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-[#F3EBE7] px-3 py-1.5 text-xs font-bold text-[#795E4E]">{clipCount} {t.review.photosLabel}</span>{canReorder && <span className="flex items-center gap-1.5 rounded-full bg-[#F0E3DC] px-3 py-1.5 text-xs font-bold text-[#71472F]"><Wand2 size={12} />{user?.stagingCreditsRemaining ?? 0} {t.review.staging.creditsLabel}</span>}</div></div>
-            {stagingError && <p className="mt-3 flex gap-2 rounded-xl bg-[#FFEFE5] px-3 py-2.5 text-xs font-medium leading-5 text-[#94522C]"><AlertCircle size={15} className="shrink-0" />{stagingError}</p>}
+            <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-sm font-bold text-[#402F25]">{t.review.storyboard}</h2><p className="mt-1 max-w-lg text-xs leading-5 text-[#817975]">{t.review.storyboardBody}</p></div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-[#F3EBE7] px-3 py-1.5 text-xs font-bold text-[#795E4E]">{clipCount} {t.review.photosLabel}</span></div></div>
 
             <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
               {data.mediaUrls.map((url, index) => (
                 <div key={url} className="group overflow-hidden rounded-2xl border border-[#251811]/10 bg-[#F6F2EF]">
-                  <div className="relative aspect-[4/3] overflow-hidden"><img src={url} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" alt={`${t.review.photoAlt} ${index + 1}`} /><span className="absolute start-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-[#251811]/75 text-[10px] font-bold text-white">{String(index + 1).padStart(2, "0")}</span>{stagedStyles[index] && <span className="absolute bottom-1.5 end-1.5 flex items-center gap-1 rounded-md bg-[#251811]/85 px-1.5 py-1 text-[10px] font-bold text-white"><Wand2 size={10} />{t.review.staging.staged}</span>}</div>
-                  <div className="p-3"><p className="truncate text-xs font-bold text-[#4C3B31]">{names[index] || `${t.review.shotFallback} ${index + 1}`}</p><p className="mt-1 text-[10px] font-medium text-[#948D89]">{prompts[index] || prompts[index % prompts.length]}</p>{canReorder && <div className="mt-2 flex gap-1.5"><button type="button" disabled={index === 0 || reorder.isPending} onClick={() => moveShot(index, -1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#251811]/10 text-[#705F55] disabled:opacity-25" aria-label={`${t.review.moveUp} ${index + 1}`}><ArrowUp size={15} /></button><button type="button" disabled={index === data.mediaUrls.length - 1 || reorder.isPending} onClick={() => moveShot(index, 1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#251811]/10 text-[#705F55] disabled:opacity-25" aria-label={`${t.review.moveDown} ${index + 1}`}><ArrowDown size={15} /></button></div>}{canReorder && <div className="mt-1.5 flex gap-1.5"><select value={stagingStyle[index] ?? STAGING_STYLES[0]} onChange={event => setStagingStyle(current => ({ ...current, [index]: event.target.value as StagingStyle }))} className="h-9 min-w-0 flex-1 rounded-lg border border-[#251811]/10 bg-white px-1.5 text-[10px] font-semibold text-[#503F35]">{STAGING_STYLES.map(style => <option key={style} value={style}>{t.review.staging.styles[style]}</option>)}</select><button type="button" disabled={stage.isPending} onClick={() => stage.mutate({ id, index, style: stagingStyle[index] ?? STAGING_STYLES[0] })} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[#251811]/10 text-[#705F55] disabled:opacity-50" aria-label={`${t.review.staging.stage} ${index + 1}`}>{stage.isPending && stage.variables?.index === index ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}</button></div>}</div>
+                  <div className="relative aspect-[4/3] overflow-hidden"><img src={url} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" alt={`${t.review.photoAlt} ${index + 1}`} /><span className="absolute start-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-[#251811]/75 text-[10px] font-bold text-white">{String(index + 1).padStart(2, "0")}</span></div>
+                  <div className="p-3"><p className="truncate text-xs font-bold text-[#4C3B31]">{names[index] || `${t.review.shotFallback} ${index + 1}`}</p><p className="mt-1 text-[10px] font-medium text-[#948D89]">{prompts[index] || prompts[index % prompts.length]}</p>{canReorder && <div className="mt-2 flex gap-1.5"><button type="button" disabled={index === 0 || reorder.isPending} onClick={() => moveShot(index, -1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#251811]/10 text-[#705F55] disabled:opacity-25" aria-label={`${t.review.moveUp} ${index + 1}`}><ArrowUp size={15} /></button><button type="button" disabled={index === data.mediaUrls.length - 1 || reorder.isPending} onClick={() => moveShot(index, 1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#251811]/10 text-[#705F55] disabled:opacity-25" aria-label={`${t.review.moveDown} ${index + 1}`}><ArrowDown size={15} /></button></div>}</div>
                 </div>
               ))}
             </div>
