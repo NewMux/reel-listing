@@ -20,6 +20,7 @@ const VISION_SYSTEM_PROMPT = [
   "confidence must be one of: high, medium, low. Use low whenever the room type is not clearly supported by visible evidence.",
   "timeOfDay must be one of: morning, midday, afternoon, evening, night, unknown. Infer it only from visible cues such as sky tone, shadow length, window light color, or interior artificial lighting. Use unknown whenever the photo has no reliable time-of-day evidence, such as an interior shot with no visible windows or sky.",
   "cameraMove must describe one restrained, physically plausible ten-second eye-level move using a grounded gimbal, dolly, slider, or shallow arc, and must follow the required movement assignment in the user prompt.",
+  "cameraMove must keep a constant distance from the subject: never describe the camera moving toward or away from anything (no push-in, pull-back, dolly-toward, or dolly-away), only lateral, diagonal-at-constant-depth, or arcing movement.",
   "lighting must describe only light behavior visible or safely implied by the reference image, and must remain consistent with the detected timeOfDay.",
   "focus must name one visible architectural or lifestyle feature without inventing anything.",
   "Never claim a room or object that is not clearly visible. If uncertain, use unknown and neutral language.",
@@ -27,16 +28,16 @@ const VISION_SYSTEM_PROMPT = [
 ].join(" ");
 
 const MOVEMENT_DIRECTIVES = [
-  "a forward gimbal push toward the strongest depth line",
+  "a smooth lateral gimbal track across the room’s strongest depth line",
   "a smooth lateral gimbal track that creates clear foreground-to-background parallax",
   "a measured diagonal gimbal move that travels across the room’s main perspective",
   "a gentle gimbal arc around the dominant architectural feature while keeping verticals straight",
   "a smooth parallel gimbal track along the nearest visible architectural edge at constant height",
-  "a slow backward gimbal pull at constant height that reveals more context while preserving the exact composition",
+  "a slow lateral gimbal drift that reveals more context while preserving the exact composition",
   "a precise side-to-side gimbal glide past the nearest visible foreground edge",
   "a calm horizontal corner-to-corner gimbal travel at constant height that follows the strongest sightline",
-  "a subtle forward-and-lateral gimbal drift toward the brightest visible opening",
-  "a short eye-level dolly move toward the nearest visible material plane",
+  "a subtle lateral gimbal drift across the room toward its brightest visible opening",
+  "a short lateral gimbal glide past the nearest visible material plane",
 ] as const;
 
 function movementDirective(index: number) {
@@ -46,7 +47,7 @@ function movementDirective(index: number) {
 const CINEMATIC_LOCK = [
   "Use the supplied image as the exact first frame and preserve its room, architecture, furniture, finishes, windows, landscaping, horizon, and proportions.",
   "Create a premium editorial property-film shot with a natural architectural perspective, restrained luxury, realistic exposure, subtle depth, and believable parallax.",
-  "Use one continuous ten-second camera move that starts immediately on the first frame, with a single physically plausible grounded forward, lateral, diagonal, or shallow arcing travel at constant camera height selected to suit the composition, sustained parallax through the middle, and natural motion through the final frame.",
+  "Use one continuous ten-second camera move that starts immediately on the first frame, with a single physically plausible grounded lateral, diagonal, or shallow arcing travel at constant camera height and constant distance from the subject, selected to suit the composition, sustained parallax through the middle, and natural motion through the final frame.",
   "The camera should feel as if it is operated on a stabilized professional gimbal at eye level, with purposeful grounded movement from start to finish, constant height, smooth acceleration and deceleration, no static opening or closing hold, no abrupt changes, and no presentation-style slideshow motion.",
   "Use a rectilinear 24–35mm architectural-lens look with straight verticals; no handheld shake, snap zoom, whip pan, time lapse, orbiting spin, or exaggerated lens distortion.",
   "Keep the shot camera-led and continuous. Do not stage a sequence of visual steps, object reveals, lighting changes, before-and-after moments, or artificial scene progression. Do not make the camera orbit, spin, or float through walls. Allow only minimal natural movement already supported by the image.",
@@ -124,7 +125,7 @@ export function buildCinematicPrompt(index: number, direction: { shotType: strin
     direction.timeOfDay === "unknown"
       ? "Time of day is not clearly evident from the photo; keep the lighting exactly as shown without implying a specific time of day."
       : `Time of day: ${direction.timeOfDay}. Preserve the natural lighting condition of this time of day throughout the shot; do not introduce artificial day-to-night, night-to-day, or golden-hour transitions that are not already present in the photo.`,
-    `Required movement variation for this shot: ${movementDirective(index)}. Use this movement family and do not repeat a generic lateral pan.`,
+    `Required movement variation for this shot: ${movementDirective(index)}. Use this movement family, keep a constant distance from the subject with no push-in, pull-back, or zoom feel, and do not repeat a generic lateral pan.`,
     `Camera choreography: ${cameraMove}.`,
     `Light behavior: ${lighting}.`,
     `Visual focus: ${focus}.`,
