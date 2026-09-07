@@ -10,6 +10,10 @@ export type StitchProgress = {
   currentStep: string;
 };
 
+// Standard, tasteful crossfade length for a real-estate reel -- long enough to read as a
+// dissolve rather than a flicker, short enough not to eat into each room's own shot.
+const TRANSITION_SECONDS = 0.6;
+
 let ffmpeg: FFmpeg | null = null;
 let loadPromise: Promise<FFmpeg> | null = null;
 
@@ -53,8 +57,19 @@ async function runWithProgress(
   }
 }
 
-function concatManifest(files: string[]) {
-  return files.map(filename => `file '${filename}'`).join("\n");
+// Chains xfade transitions across every clip: [0:v][1:v]xfade=...offset=O1[v1];[v1][2:v]xfade=...offset=O2[v2];...
+// Every clip has the same forced duration (see normalizeClip's -t flag), so each transition's
+// offset is deterministic: the i-th crossfade starts i * (clipDuration - transitionSeconds) in.
+function buildCrossfadeFilter(clipCount: number, clipDuration: number, transitionSeconds: number) {
+  const stages: string[] = [];
+  let previousLabel = "0:v";
+  for (let index = 1; index < clipCount; index += 1) {
+    const offset = index * (clipDuration - transitionSeconds);
+    const outputLabel = index === clipCount - 1 ? "vout" : `v${index}`;
+    stages.push(`[${previousLabel}][${index}:v]xfade=transition=fade:duration=${transitionSeconds}:offset=${offset.toFixed(2)}[${outputLabel}]`);
+    previousLabel = outputLabel;
+  }
+  return stages.join(";");
 }
 
 async function normalizeClip(
@@ -128,20 +143,49 @@ export async function stitchClips(
     normalizedFiles.push(normalizedFilename);
   }
 
-  onProgress({ progress: 86, currentStep: "Combining the complete silent clips in order…" });
-  await engine.writeFile("concat.txt", new TextEncoder().encode(concatManifest(normalizedFiles)));
-  const copyArgs = [
-    "-f", "concat",
-    "-safe", "0",
-    "-i", "concat.txt",
-    "-an",
-    "-c", "copy",
-    "-movflags", "+faststart",
-    "final-reel.mp4",
-  ];
-  const copyExitCode = await runWithProgress(engine, copyArgs, onProgress, 86, 94, "Combining the complete silent clips in order…");
-  if (copyExitCode !== 0) {
-    throw new Error(`The normalized clips could not be combined (FFmpeg exit code ${copyExitCode}).`);
+  if (normalizedFiles.length === 1) {
+    onProgress({ progress: 86, currentStep: "Finalizing your reel…" });
+    const singleClipArgs = ["-i", normalizedFiles[0], "-c", "copy", "-movflags", "+faststart", "final-reel.mp4"];
+    const singleClipExitCode = await runWithProgress(engine, singleClipArgs, onProgress, 86, 94, "Finalizing your reel…");
+    if (singleClipExitCode !== 0) {
+      throw new Error(`The final reel could not be assembled (FFmpeg exit code ${singleClipExitCode}).`);
+    }
+  } else {
+    onProgress({ progress: 86, currentStep: "Blending clips into a cinematic dissolve…" });
+    const filterComplex = buildCrossfadeFilter(normalizedFiles.length, FAL_CLIP_SECONDS, TRANSITION_SECONDS);
+    const inputArgs = normalizedFiles.flatMap(filename => ["-i", filename]);
+    const commonArgs = [
+      ...inputArgs,
+      "-filter_complex", filterComplex,
+      "-map", "[vout]",
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+      "final-reel.mp4",
+    ];
+    const h264Args = [
+      ...commonArgs.slice(0, commonArgs.length - 1),
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-b:v", "1800k",
+      "-maxrate", "2200k",
+      "-bufsize", "3600k",
+      commonArgs[commonArgs.length - 1],
+    ];
+    const primaryExitCode = await runWithProgress(engine, h264Args, onProgress, 86, 94, "Blending clips into a cinematic dissolve…");
+    if (primaryExitCode !== 0) {
+      const mpeg4Args = [
+        ...commonArgs.slice(0, commonArgs.length - 1),
+        "-c:v", "mpeg4",
+        "-b:v", "1800k",
+        "-maxrate", "2200k",
+        "-bufsize", "3600k",
+        commonArgs[commonArgs.length - 1],
+      ];
+      const fallbackExitCode = await runWithProgress(engine, mpeg4Args, onProgress, 86, 94, "Using the compatible browser encoder to blend the clips…");
+      if (fallbackExitCode !== 0) {
+        throw new Error(`The clips could not be blended into the final reel (FFmpeg exit code ${fallbackExitCode}).`);
+      }
+    }
   }
 
   onProgress({ progress: 96, currentStep: "Final silent reel assembled and ready for download…" });
