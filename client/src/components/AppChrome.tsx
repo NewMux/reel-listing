@@ -27,7 +27,7 @@ export function PublicNav() {
 
 export function Footer() {
   const { locale } = useLocale(); const t = copy[locale];
-  return <footer className="border-t border-[#251811]/10 bg-[#F0E8E3]"><div className="mx-auto flex max-w-[1280px] flex-col gap-7 px-5 py-9 sm:flex-row sm:items-center sm:justify-between sm:px-8"><Brand /><div className="flex items-center gap-5 text-sm text-[#645851]"><Link href="/contact" className="hover:text-[#251811]">{t.nav.contact}</Link><Link href="/terms" className="hover:text-[#251811]">{t.common.terms}</Link><Link href="/privacy" className="hover:text-[#251811]">{t.common.privacy}</Link></div><p className="text-xs text-[#817974]">© 2026 reel-listing.com</p></div></footer>;
+  return <footer className="border-t border-[#251811]/10 bg-[#F0E8E3]"><div className="mx-auto flex max-w-[1280px] flex-col gap-7 px-5 py-9 sm:flex-row sm:items-center sm:justify-between sm:px-8"><Brand /><div className="flex items-center gap-5 text-sm text-[#645851]"><Link href="/contact" className="hover:text-[#251811]">{t.nav.contact}</Link><Link href="/terms" className="hover:text-[#251811]">{t.common.terms}</Link><Link href="/privacy" className="hover:text-[#251811]">{t.common.privacy}</Link></div><div className="flex items-center gap-2 text-xs text-[#817974]"><p>© 2026 reel-listing.com</p><span aria-hidden="true">·</span><p>{t.common.poweredBy} <a href="https://newmux.com" target="_blank" rel="noreferrer" className="font-bold uppercase tracking-[.1em] text-[#645851] hover:text-[#251811]">NewMux</a></p></div></div></footer>;
 }
 
 export function AppSidebar({ children }: { children: ReactNode }) {
