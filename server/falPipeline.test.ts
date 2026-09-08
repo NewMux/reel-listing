@@ -25,6 +25,25 @@ describe("fal.ai prompt construction", () => {
     expect(prompt).toContain("Camera choreography -- the movement chosen specifically for this room");
   });
 
+  // Regression test: a prior version of CINEMATIC_LOCK grew large enough that the per-photo
+  // camera move -- the entire point of the vision-classification pipeline -- was silently cut
+  // off mid-sentence by limitPrompt's tail truncation on every real render, even though the
+  // above test still passed (it only checked for the label prefix, not that real content
+  // followed it). Assert the actual cameraMove text survives verbatim, not just its label.
+  it("never truncates away the actual camera move, even with maximal lighting/focus text", () => {
+    const cameraMove = "a lateral gimbal track across the living area that keeps the sofa and fireplace in frame while revealing the far wall UNIQUE-CAMERA-MOVE-TAIL";
+    const prompt = buildCinematicPrompt(9, {
+      shotType: "detail",
+      timeOfDay: "evening",
+      cameraMove,
+      lighting: "natural light description ".repeat(40),
+      focus: "architectural focus description ".repeat(40),
+    }, project);
+
+    expect(prompt.length).toBeLessThanOrEqual(FAL_PROMPT_MAX_CHARS);
+    expect(prompt).toContain(cameraMove);
+  });
+
   it("describes the detected time of day and asks for it to be preserved", () => {
     const prompt = buildCinematicPrompt(0, {
       shotType: "living-room",
