@@ -19,7 +19,7 @@ const VISION_SYSTEM_PROMPT = [
   "shotType must be one of: outdoor-view, living-room, kitchen-dining, bedroom, bathroom, detail, unknown.",
   "confidence must be one of: high, medium, low. Use low whenever the room type is not clearly supported by visible evidence.",
   "timeOfDay must be one of: morning, midday, afternoon, evening, night, unknown. Infer it only from visible cues such as sky tone, shadow length, window light color, or interior artificial lighting. Use unknown whenever the photo has no reliable time-of-day evidence, such as an interior shot with no visible windows or sky.",
-  "cameraMove must describe one restrained, physically plausible ten-second eye-level move using a grounded gimbal, dolly, slider, or shallow arc, and must follow the required movement assignment in the user prompt.",
+  "cameraMove must describe the one grounded, physically plausible ten-second eye-level move that best fits this specific photo's actual room type and composition -- freely choose among a forward gimbal push, backward pull, lateral track, diagonal travel, gentle arc around a focal feature, side-to-side glide, corner-to-corner travel, or short dolly move based on what genuinely suits the space (for example an arc for a kitchen island, a forward glide for a hallway or entrance, a lateral track for a wide living area, a backward reveal for a compact room), not by rotating through a fixed list.",
   "lighting must describe only light behavior visible or safely implied by the reference image, and must remain consistent with the detected timeOfDay.",
   "focus must name one visible architectural or lifestyle feature without inventing anything.",
   "Never claim a room or object that is not clearly visible. If uncertain, use unknown and neutral language.",
@@ -38,10 +38,6 @@ const MOVEMENT_DIRECTIVES = [
   "a subtle forward-and-lateral gimbal drift toward the brightest visible opening",
   "a short eye-level dolly move toward the nearest visible material plane",
 ] as const;
-
-function movementDirective(index: number) {
-  return MOVEMENT_DIRECTIVES[index % MOVEMENT_DIRECTIVES.length];
-}
 
 const CINEMATIC_LOCK = [
   "Use the supplied image as the exact first frame and preserve its room, architecture, furniture, finishes, windows, landscaping, horizon, and proportions.",
@@ -124,8 +120,7 @@ export function buildCinematicPrompt(index: number, direction: { shotType: strin
     direction.timeOfDay === "unknown"
       ? "Time of day is not clearly evident from the photo; keep the lighting exactly as shown without implying a specific time of day."
       : `Time of day: ${direction.timeOfDay}. Preserve the natural lighting condition of this time of day throughout the shot; do not introduce artificial day-to-night, night-to-day, or golden-hour transitions that are not already present in the photo.`,
-    `Required movement variation for this shot: ${movementDirective(index)}. Use this movement family and do not repeat a generic lateral pan.`,
-    `Camera choreography: ${cameraMove}.`,
+    `Camera choreography -- the movement chosen specifically for this room, not a repeated generic lateral pan: ${cameraMove}.`,
     `Light behavior: ${lighting}.`,
     `Visual focus: ${focus}.`,
     `This is shot ${index + 1} in a ${project.mediaUrls.length}-shot property film for ${propertyContext(project)}.`,
@@ -169,7 +164,7 @@ function promptInstruction(index: number, project: VideoProject) {
   return [
     `This is property photo ${index + 1} of a ${project.mediaUrls.length}-photo listing sequence.`,
     `Listing context: ${propertyContext(project)}.`,
-    `Required movement assignment: ${movementDirective(index)}. Return a cameraMove that follows this assignment without adding a second movement or a visual step sequence.`,
+    "Choose the camera move that best fits this specific photo's room type and composition -- do not default to a generic lateral pan, and do not add a second movement or a visual step sequence.",
     "Analyze the attached image and return the requested JSON shot design. The final clip will be ten seconds long.",
     "Use only visible evidence. The shot design must prioritize exact-image preservation over decorative description.",
   ].join(" ");
