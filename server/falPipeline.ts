@@ -140,7 +140,7 @@ export function buildCinematicPrompt(index: number, direction: { shotType: strin
     direction.timeOfDay === "unknown"
       ? "Time of day is not clearly evident from the photo; keep the lighting exactly as shown without implying a specific time of day."
       : `Time of day: ${direction.timeOfDay}. Preserve the natural lighting condition of this time of day throughout the shot; do not introduce artificial day-to-night, night-to-day, or golden-hour transitions that are not already present in the photo.`,
-    `Shot type: ${direction.shotType}. Classification confidence is conservative; if the room is not clearly visible, treat it as a property detail rather than guessing.`,
+    `Shot type: ${direction.shotType} (treat as a property detail if not clearly visible).`,
     `Light behavior: ${lighting}.`,
     `Visual focus: ${focus}.`,
     `This is shot ${index + 1} in a ${project.mediaUrls.length}-shot property film for ${propertyContext(project)}.`,
