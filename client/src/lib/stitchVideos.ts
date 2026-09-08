@@ -64,6 +64,14 @@ async function runWithProgress(
   try {
     const exitCode = await engine.exec(args);
     return { exitCode, logTail: logLines.join("\n") };
+  } catch (error) {
+    // engine.exec() can reject instead of resolving with a non-zero code (e.g. a WASM-level
+    // abort on a malformed filter graph). Every call site branches on exitCode !== 0 to decide
+    // whether to retry with a fallback encoder or a simpler filter -- a thrown exception would
+    // skip all of that and blow straight through stitchClips(), so normalize it into the same
+    // shape a failed exec() already produces instead of letting it propagate uncaught.
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return { exitCode: -1, logTail: [...logLines, errorMessage].join("\n") };
   } finally {
     engine.off("progress", progressHandler);
     engine.off("log", logHandler);
@@ -218,7 +226,7 @@ export async function stitchClips(
       const concatArgs = ["-y", "-f", "concat", "-safe", "0", "-i", "concat.txt", "-an", "-c", "copy", "-movflags", "+faststart", "final-reel.mp4"];
       const concatResult = await runWithProgress(engine, concatArgs, onProgress, 88, 94, "Combining the clips in order…");
       if (concatResult.exitCode !== 0) {
-        throw new Error(`The clips could not be blended into the final reel (FFmpeg exit code ${concatResult.exitCode}).`);
+        throw new Error(`The clips could not be blended into the final reel (FFmpeg exit code ${concatResult.exitCode}). ${concatResult.logTail.slice(-300)}`);
       }
     }
   }
