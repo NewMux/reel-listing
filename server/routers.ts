@@ -27,8 +27,8 @@ import {
 } from "./projects";
 import { signStoredUrl, storageCreatePutTarget, storageGetSignedUrl } from "./storage";
 import { appendUploadChunk, createUploadSession, finalizeUploadSession } from "./uploadSessions";
-import { getProjectRenderStatus } from "./renderPipeline";
-import { refreshFalRender, submitFalRender } from "./falPipeline";
+import { getProjectRenderStatus, getShotPlan } from "./renderPipeline";
+import { refreshFalRender, refreshShotClassification, submitFalRender, submitShotClassification } from "./falPipeline";
 
 const fileSchema = z.object({
   name: z.string().min(1).max(240),
@@ -151,6 +151,14 @@ export const appRouter = router({
             mediaTypes: input.files.map(file => file.type),
             status: "Review",
           });
+          const created = await getVideoProject(ctx.user.id, id);
+          if (created) {
+            try {
+              await submitShotClassification(ctx.user.id, created, ctx.supabaseAccessToken);
+            } catch (error) {
+              console.error(`[Projects] pre-approval classification submission failed for project ${id}:`, error);
+            }
+          }
           return { id };
         } catch (error) {
           console.error("[Projects] create failed:", error);
@@ -186,6 +194,14 @@ export const appRouter = router({
           mediaTypes: images.map(() => "image/png"),
           status: "Review",
         });
+        const created = await getVideoProject(ctx.user.id, id);
+        if (created) {
+          try {
+            await submitShotClassification(ctx.user.id, created, ctx.supabaseAccessToken);
+          } catch (error) {
+            console.error(`[Projects] pre-approval classification submission failed for project ${id}:`, error);
+          }
+        }
         return { id };
       }),
     approve: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
@@ -306,6 +322,23 @@ export const appRouter = router({
           }
         }
         return presentRender(getProjectRenderStatus(project), project, ctx.supabaseAccessToken);
+      }),
+    shotDirections: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        projectIdInput(input.id);
+        const project = await getVideoProject(ctx.user.id, input.id);
+        if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+        if (project.status !== "Review" || !project.promptRequestIds?.length) {
+          return { shots: getShotPlan(project.mediaUrls, project.generatedPrompts || []), ready: true };
+        }
+        try {
+          const { generatedPrompts, ready } = await refreshShotClassification(ctx.user.id, project, ctx.supabaseAccessToken);
+          return { shots: getShotPlan(project.mediaUrls, generatedPrompts), ready };
+        } catch (error) {
+          console.error(`[Projects] shotDirections refresh failed for project ${input.id}:`, error);
+          return { shots: getShotPlan(project.mediaUrls, project.generatedPrompts || []), ready: false };
+        }
       }),
     complete: protectedProcedure
       .input(z.object({ id: z.number().int().positive(), finalVideoUrl: z.string().min(1).max(2_000) }))

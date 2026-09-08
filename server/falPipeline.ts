@@ -237,19 +237,72 @@ async function submitVideoJobs(client: typeof fal, signedImages: string[], promp
   return responses.map(response => response.request_id);
 }
 
-export async function submitFalRender(userId: number, project: VideoProject, accessToken?: string | null) {
+// Kicks off per-photo vision classification as soon as a project is created, well before the
+// user approves it -- lets the Review page show real per-photo shot direction instead of
+// decorative placeholders. Deliberately mirrors only the vision-submission half of
+// submitFalRender; it must never touch video jobs.
+export async function submitShotClassification(userId: number, project: VideoProject, accessToken?: string | null) {
   const client = getFalClient();
   const signedImages = await getFalSourceUrls(project, accessToken);
   const promptRequestIds = await submitVisionPromptJobs(client, signedImages, project);
-  const emptyPrompts = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
+  const generatedPrompts = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
+  await updateVideoProject(userId, project.id, { promptRequestIds, generatedPrompts });
+}
+
+// Polls whatever vision jobs submitShotClassification already started and persists results as
+// they land. Pre-approval, a single photo's classification failing or still being in flight is
+// cosmetic, not fatal -- fallbackPrompt already covers an unresolved photo at render time -- so
+// this never reports a hard failure and never submits a video job under any circumstance.
+export async function refreshShotClassification(userId: number, project: VideoProject, accessToken?: string | null) {
+  const promptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
+  const generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
+  if (!promptRequestIds.some(Boolean) || allReady(generatedPrompts, project.mediaUrls.length)) {
+    return { generatedPrompts, ready: allReady(generatedPrompts, project.mediaUrls.length) };
+  }
+
+  const client = getFalClient();
+  await Promise.all(promptRequestIds.map(async (requestId, index) => {
+    if (!requestId || generatedPrompts[index]) return;
+    try {
+      const status = await client.queue.status(FAL_VISION_PROMPT_MODEL, { requestId, logs: false });
+      if (status.status === "COMPLETED") {
+        const result = await client.queue.result(FAL_VISION_PROMPT_MODEL, { requestId });
+        generatedPrompts[index] = normalizeDirection(result.data, index, project);
+      }
+    } catch (error) {
+      console.error(`[FalPipeline] pre-approval classification poll failed for project ${project.id}, photo ${index + 1}:`, error);
+    }
+  }));
+
+  await updateVideoProject(userId, project.id, { generatedPrompts });
+  return { generatedPrompts, ready: allReady(generatedPrompts, project.mediaUrls.length) };
+}
+
+export async function submitFalRender(userId: number, project: VideoProject, accessToken?: string | null) {
+  const client = getFalClient();
+  const existingPromptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
+  const alreadyClassifying = existingPromptRequestIds.some(Boolean);
+
+  // If pre-approval classification (submitShotClassification) already submitted vision jobs,
+  // keep them and whatever's already resolved instead of re-submitting -- approving a project
+  // must not pay for a second round of vision classification. refreshFalRender's existing
+  // polling picks up any still-pending prompts and falls through to video jobs once ready.
+  let promptRequestIds = existingPromptRequestIds;
+  let generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
+  if (!alreadyClassifying) {
+    const signedImages = await getFalSourceUrls(project, accessToken);
+    promptRequestIds = await submitVisionPromptJobs(client, signedImages, project);
+    generatedPrompts = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
+  }
   const emptyClips = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
+  const renderProgress = alreadyClassifying ? Math.round((generatedPrompts.filter(Boolean).length / project.mediaUrls.length) * 15) : 0;
 
   await updateVideoProject(userId, project.id, {
     promptRequestIds,
-    generatedPrompts: emptyPrompts,
+    generatedPrompts,
     falRequestIds: [],
     clipUrls: emptyClips,
-    renderProgress: 0,
+    renderProgress,
     renderPhase: "generating",
     renderError: null,
   });
@@ -258,10 +311,10 @@ export async function submitFalRender(userId: number, project: VideoProject, acc
     ...project,
     status: "Processing",
     promptRequestIds,
-    generatedPrompts: emptyPrompts,
+    generatedPrompts,
     falRequestIds: [],
     clipUrls: emptyClips,
-    renderProgress: 0,
+    renderProgress,
     renderPhase: "generating",
     renderError: null,
   });
