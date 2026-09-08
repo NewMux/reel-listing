@@ -67,6 +67,20 @@ function compactDirection(value: string, maxLength: number) {
   return `${value.slice(0, maxLength - 1).trimEnd()}.`;
 }
 
+// console.error's default inspection depth flattens a fal.ai ValidationError's nested
+// `body.detail` into an unhelpful "[Object]" -- surface the real validation reason instead so a
+// future failure like that is diagnosable from logs alone, not a guessing game.
+function describeFalError(error: unknown) {
+  if (error && typeof error === "object" && "body" in error) {
+    try {
+      return `${String(error)} ${JSON.stringify((error as { body?: unknown }).body)}`;
+    } catch {
+      // fall through to the generic branch below
+    }
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 function normalizeConfidence(value: unknown) {
   const text = typeof value === "string" ? value.toLowerCase() : "";
   return text === "high" || text === "medium" ? text : "low";
@@ -114,13 +128,19 @@ export function buildCinematicPrompt(index: number, direction: { shotType: strin
   const cameraMove = compactDirection(direction.cameraMove, 220);
   const lighting = compactDirection(direction.lighting, 140);
   const focus = compactDirection(direction.focus, 140);
+  // Ordered by how badly the render suffers if limitPrompt has to truncate the tail: the
+  // per-photo camera choreography is the entire point of the vision-classification pipeline
+  // and must never be cut, so it goes immediately after the fixed CINEMATIC_LOCK rules --
+  // ahead of shot type/time-of-day/light/focus, which degrade gracefully with a generic
+  // fallback if trimmed, and well ahead of the closing reinforcement line, which is pure
+  // restatement and safe to lose first.
   return limitPrompt([
     CINEMATIC_LOCK,
-    `Shot type: ${direction.shotType}. Classification confidence is conservative; if the room is not clearly visible, treat it as a property detail rather than guessing.`,
+    `Camera choreography -- the movement chosen specifically for this room, not a repeated generic lateral pan: ${cameraMove}.`,
     direction.timeOfDay === "unknown"
       ? "Time of day is not clearly evident from the photo; keep the lighting exactly as shown without implying a specific time of day."
       : `Time of day: ${direction.timeOfDay}. Preserve the natural lighting condition of this time of day throughout the shot; do not introduce artificial day-to-night, night-to-day, or golden-hour transitions that are not already present in the photo.`,
-    `Camera choreography -- the movement chosen specifically for this room, not a repeated generic lateral pan: ${cameraMove}.`,
+    `Shot type: ${direction.shotType}. Classification confidence is conservative; if the room is not clearly visible, treat it as a property detail rather than guessing.`,
     `Light behavior: ${lighting}.`,
     `Visual focus: ${focus}.`,
     `This is shot ${index + 1} in a ${project.mediaUrls.length}-shot property film for ${propertyContext(project)}.`,
@@ -270,7 +290,7 @@ export async function refreshShotClassification(userId: number, project: VideoPr
         generatedPrompts[index] = normalizeDirection(result.data, index, project);
       }
     } catch (error) {
-      console.error(`[FalPipeline] pre-approval classification poll failed for project ${project.id}, photo ${index + 1}:`, error);
+      console.error(`[FalPipeline] pre-approval classification poll failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
     }
   }));
 
@@ -340,8 +360,8 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
           failedMessage = `fal.ai could not create direction for photo ${index + 1}.`;
         }
       } catch (error) {
-        console.error(`[FalPipeline] vision prompt poll failed for project ${project.id}, photo ${index + 1}:`, error);
-        failedMessage = error instanceof Error ? error.message : `fal.ai could not create direction for photo ${index + 1}.`;
+        console.error(`[FalPipeline] vision prompt poll failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
+        failedMessage = describeFalError(error) || `fal.ai could not create direction for photo ${index + 1}.`;
       }
     }));
 
@@ -392,8 +412,8 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
         failedMessage = `fal.ai could not render photo ${index + 1}.`;
       }
     } catch (error) {
-      console.error(`[FalPipeline] video render poll failed for project ${project.id}, photo ${index + 1}:`, error);
-      failedMessage = error instanceof Error ? error.message : `fal.ai could not render photo ${index + 1}.`;
+      console.error(`[FalPipeline] video render poll failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
+      failedMessage = describeFalError(error) || `fal.ai could not render photo ${index + 1}.`;
     }
   }));
 
