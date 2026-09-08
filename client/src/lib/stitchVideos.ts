@@ -37,6 +37,11 @@ async function fetchClip(url: string) {
   }, { label: "clip download", retries: 3, baseDelayMs: 500, maxDelayMs: 5_000 });
 }
 
+// Keeps the tail of ffmpeg's own log output alongside the exit code -- a bare exit code gives
+// no way to tell "unsupported filter" apart from "out of memory" apart from anything else, so
+// callers that need to diagnose or report a failure can surface what ffmpeg actually said.
+const LOG_TAIL_LINES = 20;
+
 async function runWithProgress(
   engine: FFmpeg,
   args: string[],
@@ -49,11 +54,19 @@ async function runWithProgress(
     const normalized = Math.max(0, Math.min(1, progress));
     onProgress({ progress: Math.round(start + normalized * (end - start)), currentStep });
   };
+  const logLines: string[] = [];
+  const logHandler = ({ message }: { message: string }) => {
+    logLines.push(message);
+    if (logLines.length > LOG_TAIL_LINES) logLines.shift();
+  };
   engine.on("progress", progressHandler);
+  engine.on("log", logHandler);
   try {
-    return await engine.exec(args);
+    const exitCode = await engine.exec(args);
+    return { exitCode, logTail: logLines.join("\n") };
   } finally {
     engine.off("progress", progressHandler);
+    engine.off("log", logHandler);
   }
 }
 
@@ -72,6 +85,10 @@ function buildCrossfadeFilter(clipCount: number, clipDuration: number, transitio
   return stages.join(";");
 }
 
+function concatManifest(files: string[]) {
+  return files.map(filename => `file '${filename}'`).join("\n");
+}
+
 async function normalizeClip(
   engine: FFmpeg,
   source: string,
@@ -81,6 +98,7 @@ async function normalizeClip(
   end: number,
 ) {
   const commonArgs = [
+    "-y",
     "-i", source,
     "-an",
     "-vf", "scale=720:-2:flags=lanczos,setsar=1,format=yuv420p",
@@ -99,8 +117,8 @@ async function normalizeClip(
     "-bufsize", "3600k",
     commonArgs[commonArgs.length - 1],
   ];
-  const primaryExitCode = await runWithProgress(engine, h264Args, onProgress, start, end, "Optimizing the next full-length clip for final delivery…");
-  if (primaryExitCode === 0) return;
+  const primary = await runWithProgress(engine, h264Args, onProgress, start, end, "Optimizing the next full-length clip for final delivery…");
+  if (primary.exitCode === 0) return;
 
   const mpeg4Args = [
     ...commonArgs.slice(0, commonArgs.length - 1),
@@ -110,9 +128,9 @@ async function normalizeClip(
     "-bufsize", "3600k",
     commonArgs[commonArgs.length - 1],
   ];
-  const fallbackExitCode = await runWithProgress(engine, mpeg4Args, onProgress, start, end, "Using the compatible browser video encoder for the next clip…");
-  if (fallbackExitCode !== 0) {
-    throw new Error(`A clip could not be normalized for final assembly (FFmpeg exit code ${fallbackExitCode}).`);
+  const fallback = await runWithProgress(engine, mpeg4Args, onProgress, start, end, "Using the compatible browser video encoder for the next clip…");
+  if (fallback.exitCode !== 0) {
+    throw new Error(`A clip could not be normalized for final assembly (FFmpeg exit code ${fallback.exitCode}).`);
   }
 }
 
@@ -145,16 +163,17 @@ export async function stitchClips(
 
   if (normalizedFiles.length === 1) {
     onProgress({ progress: 86, currentStep: "Finalizing your reel…" });
-    const singleClipArgs = ["-i", normalizedFiles[0], "-c", "copy", "-movflags", "+faststart", "final-reel.mp4"];
-    const singleClipExitCode = await runWithProgress(engine, singleClipArgs, onProgress, 86, 94, "Finalizing your reel…");
-    if (singleClipExitCode !== 0) {
-      throw new Error(`The final reel could not be assembled (FFmpeg exit code ${singleClipExitCode}).`);
+    const singleClipArgs = ["-y", "-i", normalizedFiles[0], "-c", "copy", "-movflags", "+faststart", "final-reel.mp4"];
+    const singleClip = await runWithProgress(engine, singleClipArgs, onProgress, 86, 94, "Finalizing your reel…");
+    if (singleClip.exitCode !== 0) {
+      throw new Error(`The final reel could not be assembled (FFmpeg exit code ${singleClip.exitCode}).`);
     }
   } else {
     onProgress({ progress: 86, currentStep: "Blending clips into a cinematic dissolve…" });
     const filterComplex = buildCrossfadeFilter(normalizedFiles.length, FAL_CLIP_SECONDS, TRANSITION_SECONDS);
     const inputArgs = normalizedFiles.flatMap(filename => ["-i", filename]);
     const commonArgs = [
+      "-y",
       ...inputArgs,
       "-filter_complex", filterComplex,
       "-map", "[vout]",
@@ -171,8 +190,11 @@ export async function stitchClips(
       "-bufsize", "3600k",
       commonArgs[commonArgs.length - 1],
     ];
-    const primaryExitCode = await runWithProgress(engine, h264Args, onProgress, 86, 94, "Blending clips into a cinematic dissolve…");
-    if (primaryExitCode !== 0) {
+    const primary = await runWithProgress(engine, h264Args, onProgress, 86, 94, "Blending clips into a cinematic dissolve…");
+    let blended = primary.exitCode === 0;
+    let lastLog = primary.logTail;
+
+    if (!blended) {
       const mpeg4Args = [
         ...commonArgs.slice(0, commonArgs.length - 1),
         "-c:v", "mpeg4",
@@ -181,9 +203,22 @@ export async function stitchClips(
         "-bufsize", "3600k",
         commonArgs[commonArgs.length - 1],
       ];
-      const fallbackExitCode = await runWithProgress(engine, mpeg4Args, onProgress, 86, 94, "Using the compatible browser encoder to blend the clips…");
-      if (fallbackExitCode !== 0) {
-        throw new Error(`The clips could not be blended into the final reel (FFmpeg exit code ${fallbackExitCode}).`);
+      const fallback = await runWithProgress(engine, mpeg4Args, onProgress, 86, 94, "Using the compatible browser encoder to blend the clips…");
+      blended = fallback.exitCode === 0;
+      lastLog = fallback.logTail;
+    }
+
+    // The crossfade dissolve is a nice-to-have; delivering a video at all is not optional. If
+    // both blend attempts failed, fall back to the plain hard-cut join instead of failing the
+    // whole render -- one broken filter graph shouldn't take down every multi-photo project.
+    if (!blended) {
+      console.warn(`[Stitch] Crossfade blend failed, falling back to a hard cut between clips. Last ffmpeg output:\n${lastLog}`);
+      onProgress({ progress: 88, currentStep: "Falling back to a direct cut between clips…" });
+      await engine.writeFile("concat.txt", new TextEncoder().encode(concatManifest(normalizedFiles)));
+      const concatArgs = ["-y", "-f", "concat", "-safe", "0", "-i", "concat.txt", "-an", "-c", "copy", "-movflags", "+faststart", "final-reel.mp4"];
+      const concatResult = await runWithProgress(engine, concatArgs, onProgress, 88, 94, "Combining the clips in order…");
+      if (concatResult.exitCode !== 0) {
+        throw new Error(`The clips could not be blended into the final reel (FFmpeg exit code ${concatResult.exitCode}).`);
       }
     }
   }
