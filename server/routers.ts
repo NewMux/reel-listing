@@ -58,19 +58,19 @@ async function presentSourceUrls(project: NonNullable<Awaited<ReturnType<typeof 
   return Promise.all(project.mediaKeys.map((key, index) => isPilotMediaKey(key) ? project.mediaUrls[index] : storageGetSignedUrl(key, accessToken)));
 }
 
-async function presentProject(project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null) {
+async function presentProject(project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null, sourceUrls?: string[]) {
   if (!project) return project;
-  const mediaUrls = await presentSourceUrls(project, accessToken);
+  const mediaUrls = sourceUrls ?? await presentSourceUrls(project, accessToken);
   return { ...project, mediaUrls, finalVideoUrl: await signStoredUrl(project.finalVideoUrl, accessToken) };
 }
 
-async function presentRender(snapshot: Awaited<ReturnType<typeof getProjectRenderStatus>>, project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null) {
+async function presentRender(snapshot: Awaited<ReturnType<typeof getProjectRenderStatus>>, project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null, sourceUrls?: string[]) {
   if (!project) return snapshot;
-  const sourceUrls = await presentSourceUrls(project, accessToken);
+  const resolvedSourceUrls = sourceUrls ?? await presentSourceUrls(project, accessToken);
   return {
     ...snapshot,
     finalVideoUrl: await signStoredUrl(snapshot.finalVideoUrl, accessToken),
-    shots: snapshot.shots.map((shot, index) => ({ ...shot, sourceUrl: sourceUrls[index] || shot.sourceUrl })),
+    shots: snapshot.shots.map((shot, index) => ({ ...shot, sourceUrl: resolvedSourceUrls[index] || shot.sourceUrl })),
   };
 }
 
@@ -218,7 +218,15 @@ export const appRouter = router({
           const render = await submitFalRender(ctx.user.id, project, ctx.supabaseAccessToken);
           const updated = await updateVideoProject(ctx.user.id, input.id, transition);
           if (!updated) throw new Error("The project could not be updated after rendering started.");
-          return { project: await presentProject(updated, ctx.supabaseAccessToken), render: await presentRender(render, project, ctx.supabaseAccessToken) };
+          // mediaKeys don't change across approval -- sign them once and hand the same array to
+          // both presenters instead of paying for two full signing round-trips in series, which
+          // was enough to blow past the 10s function budget under any Storage-signing latency.
+          const sourceUrls = await presentSourceUrls(updated, ctx.supabaseAccessToken);
+          const [presentedProject, presentedRender] = await Promise.all([
+            presentProject(updated, ctx.supabaseAccessToken, sourceUrls),
+            presentRender(render, project, ctx.supabaseAccessToken, sourceUrls),
+          ]);
+          return { project: presentedProject, render: presentedRender };
         } catch (renderError) {
           await incrementVideoQuota(ctx.user.id).catch(() => {});
           throw renderError;
