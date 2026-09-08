@@ -22,7 +22,7 @@ describe("fal.ai prompt construction", () => {
 
     expect(prompt.length).toBeLessThanOrEqual(FAL_PROMPT_MAX_CHARS);
     expect(prompt).toContain("No audio.");
-    expect(prompt).toContain("a short eye-level dolly move");
+    expect(prompt).toContain("Camera choreography -- the movement chosen specifically for this room");
   });
 
   it("describes the detected time of day and asks for it to be preserved", () => {
