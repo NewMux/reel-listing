@@ -9,18 +9,23 @@ import { withRetry } from "@shared/retry";
 const MAX_PHOTOS = 10;
 const MAX_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+// fal.ai's Kling image-to-video endpoint rejects any source image below this on either
+// dimension (a live render once burned a video credit on a 150x150 thumbnail that slipped
+// through unnoticed) -- catch it here, before upload, instead of after paying for a render.
+const MIN_IMAGE_DIMENSION = 300;
 
 type Orientation = "landscape" | "portrait" | "square";
 type LocalFile = { file: File; preview: string; orientation: Orientation };
 type UploadedMedia = { name: string; type: string; key: string; url: string };
 
-function readOrientation(file: File): Promise<Orientation> {
+function readImageMeta(file: File): Promise<{ orientation: Orientation; width: number; height: number }> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      resolve(img.naturalWidth === img.naturalHeight ? "square" : img.naturalWidth > img.naturalHeight ? "landscape" : "portrait");
+      const { naturalWidth: width, naturalHeight: height } = img;
+      resolve({ orientation: width === height ? "square" : width > height ? "landscape" : "portrait", width, height });
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
@@ -63,13 +68,18 @@ export default function NewProject() {
     const accepted = next.filter(file => ACCEPTED_TYPES.includes(file.type));
     if (accepted.length !== next.length) return setError("Use JPG, PNG, or WEBP image files.");
 
-    let orientations: Orientation[];
+    let meta: { orientation: Orientation; width: number; height: number }[];
     try {
-      orientations = await Promise.all(accepted.map(readOrientation));
+      meta = await Promise.all(accepted.map(readImageMeta));
     } catch {
       return setError("Could not read one of these images. Please try a different file.");
     }
 
+    if (meta.some(item => item.width < MIN_IMAGE_DIMENSION || item.height < MIN_IMAGE_DIMENSION)) {
+      return setError(t.upload.tooSmall);
+    }
+
+    const orientations = meta.map(item => item.orientation);
     const established = files.map(item => item.orientation).find(o => o !== "square") ?? orientations.find(o => o !== "square");
     if (established && orientations.some(o => conflictingOrientation(o, established))) {
       return setError(t.upload.mixedOrientation);
