@@ -6,16 +6,6 @@ import { copy, useLocale } from "@/lib/locale";
 import { trpc } from "@/lib/trpc";
 import { FAL_CLIP_SECONDS } from "@shared/video";
 
-const shotNames = {
-  en: ["Hero view", "Living space", "Kitchen detail", "Dining moment", "Primary suite", "Bath detail", "Outdoor living", "The view", "Architecture", "Closing frame"],
-  ar: ["المشهد الرئيسي", "مساحة المعيشة", "تفصيل المطبخ", "لحظة الطعام", "الجناح الرئيسي", "تفصيل الحمام", "المعيشة الخارجية", "الإطلالة", "الهندسة المعمارية", "المشهد الختامي"],
-} as const;
-
-const shotPrompts = {
-  en: ["Forward gimbal travel", "Lateral gimbal track", "Diagonal dolly move", "Shallow architectural arc", "Subtle vertical lift", "Backward context pull", "Foreground slide", "Corner-to-corner track", "Forward and lateral drift", "Gentle descending move"],
-  ar: ["حركة جيمبال أمامية", "مسار جيمبال جانبي", "حركة دولي قطرية", "قوس معماري هادئ", "ارتفاع رأسي دقيق", "تراجع لإظهار السياق", "انزلاق أمامي سلس", "مسار من زاوية إلى أخرى", "انجراف أمامي وجانبي", "هبوط لطيف"],
-} as const;
-
 export default function ProjectReview() {
   const { locale, isRtl } = useLocale();
   const t = copy[locale];
@@ -26,6 +16,10 @@ export default function ProjectReview() {
   const [showNotes, setShowNotes] = useState(false);
   const [approveError, setApproveError] = useState("");
   const project = trpc.projects.get.useQuery({ id }, { enabled: Number.isSafeInteger(id) });
+  const shotDirections = trpc.projects.shotDirections.useQuery(
+    { id },
+    { enabled: Number.isSafeInteger(id), refetchInterval: query => query.state.data?.ready === false ? 2_000 : false },
+  );
   const utils = trpc.useUtils();
   const approve = trpc.projects.approve.useMutation({
     onSuccess: () => {
@@ -49,8 +43,7 @@ export default function ProjectReview() {
   if (project.isLoading) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.loading}</div></AppSidebar>;
   if (!project.data) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.projectNotFound}</div></AppSidebar>;
   const data = project.data;
-  const names = shotNames[locale];
-  const prompts = shotPrompts[locale];
+  const shots = shotDirections.data?.shots;
   const clipCount = data.mediaUrls.length;
   const duration = clipCount * FAL_CLIP_SECONDS;
   const canReorder = data.status === "Review";
@@ -88,12 +81,12 @@ export default function ProjectReview() {
               {data.mediaUrls.map((url, index) => (
                 <div key={url} className="group overflow-hidden rounded-2xl border border-[#251811]/10 bg-[#F6F2EF]">
                   <div className="relative aspect-[4/3] overflow-hidden"><img src={url} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" alt={`${t.review.photoAlt} ${index + 1}`} /><span className="absolute start-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-[#251811]/75 text-[10px] font-bold text-white">{String(index + 1).padStart(2, "0")}</span></div>
-                  <div className="p-3"><p className="truncate text-xs font-bold text-[#4C3B31]">{names[index] || `${t.review.shotFallback} ${index + 1}`}</p><p className="mt-1 text-[10px] font-medium text-[#948D89]">{prompts[index] || prompts[index % prompts.length]}</p>{canReorder && <div className="mt-2 flex gap-1.5"><button type="button" disabled={index === 0 || reorder.isPending} onClick={() => moveShot(index, -1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#251811]/10 text-[#705F55] disabled:opacity-25" aria-label={`${t.review.moveUp} ${index + 1}`}><ArrowUp size={15} /></button><button type="button" disabled={index === data.mediaUrls.length - 1 || reorder.isPending} onClick={() => moveShot(index, 1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#251811]/10 text-[#705F55] disabled:opacity-25" aria-label={`${t.review.moveDown} ${index + 1}`}><ArrowDown size={15} /></button></div>}</div>
+                  <div className="p-3"><p className="truncate text-xs font-bold text-[#4C3B31]">{shots ? shots[index]?.roomType || `${t.review.shotFallback} ${index + 1}` : t.review.analyzing}</p><p className="mt-1 line-clamp-2 text-[10px] font-medium text-[#948D89]">{shots ? shots[index]?.prompt : t.review.analyzing}</p>{canReorder && <div className="mt-2 flex gap-1.5"><button type="button" disabled={index === 0 || reorder.isPending} onClick={() => moveShot(index, -1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#251811]/10 text-[#705F55] disabled:opacity-25" aria-label={`${t.review.moveUp} ${index + 1}`}><ArrowUp size={15} /></button><button type="button" disabled={index === data.mediaUrls.length - 1 || reorder.isPending} onClick={() => moveShot(index, 1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#251811]/10 text-[#705F55] disabled:opacity-25" aria-label={`${t.review.moveDown} ${index + 1}`}><ArrowDown size={15} /></button></div>}</div>
                 </div>
               ))}
             </div>
 
-            <div className="mt-7 rounded-2xl border border-[#251811]/8 bg-[#F8F5F3] p-4"><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.1em] text-[#825E49]"><Sparkles size={14} />{t.review.storyboard}</div><div className="mt-3 grid gap-2 sm:grid-cols-2">{data.mediaUrls.map((_, index) => <div key={index} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2.5"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#E9C6B2] text-[10px] font-bold text-[#6B422A]">{index + 1}</span><span className="text-xs font-semibold text-[#604E44]">{prompts[index] || prompts[index % prompts.length]}</span><span className="ms-auto text-[10px] font-bold text-[#9C9692]">{FAL_CLIP_SECONDS}s</span></div>)}</div></div>
+            <div className="mt-7 rounded-2xl border border-[#251811]/8 bg-[#F8F5F3] p-4"><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.1em] text-[#825E49]"><Sparkles size={14} />{t.review.storyboard}</div><div className="mt-3 grid gap-2 sm:grid-cols-2">{data.mediaUrls.map((_, index) => <div key={index} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2.5"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#E9C6B2] text-[10px] font-bold text-[#6B422A]">{index + 1}</span><span className="line-clamp-2 flex-1 text-xs font-semibold text-[#604E44]">{shots ? shots[index]?.prompt : t.review.analyzing}</span><span className="ms-auto shrink-0 text-[10px] font-bold text-[#9C9692]">{FAL_CLIP_SECONDS}s</span></div>)}</div></div>
 
             {data.revisionNotes && <div className="mt-5 rounded-xl bg-[#F7EDE7] p-3.5"><p className="text-[11px] font-bold uppercase tracking-[.1em] text-[#885334]">{t.review.changeSent}</p><p className="mt-1 text-sm leading-6 text-[#695347]">{data.revisionNotes}</p></div>}
 
