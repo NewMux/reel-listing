@@ -43,11 +43,11 @@ const CINEMATIC_LOCK = [
   "Use the supplied image as the exact first frame and preserve its room, architecture, furniture, finishes, windows, landscaping, horizon, and proportions.",
   "Create a premium editorial property-film shot with a natural architectural perspective, restrained luxury, realistic exposure, subtle depth, and believable parallax.",
   "Use one continuous ten-second camera move that starts immediately on the first frame, with a single physically plausible grounded forward, lateral, diagonal, or shallow arcing travel at constant camera height selected to suit the composition, sustained parallax through the middle, and natural motion through the final frame.",
-  "The camera should feel as if it is operated on a stabilized professional gimbal at eye level, with purposeful grounded movement from start to finish, constant height, smooth acceleration and deceleration, no static opening or closing hold, no abrupt changes, and no presentation-style slideshow motion.",
+  "The camera should feel as if it is operated on a stabilized professional gimbal at eye level, with purposeful grounded movement from start to finish, constant height, smooth acceleration and deceleration, no static opening or closing hold, no abrupt changes, and no presentation-style slideshow motion; movement stays visibly active throughout, never settling still mid-shot.",
   "Use a rectilinear 24–35mm architectural-lens look with straight verticals; no handheld shake, snap zoom, whip pan, time lapse, orbiting spin, or exaggerated lens distortion.",
   "Keep the shot camera-led and continuous. Do not stage a sequence of visual steps, object reveals, lighting changes, before-and-after moments, or artificial scene progression. Do not make the camera orbit, spin, or float through walls. Allow only minimal natural movement already supported by the image.",
   "No audio. Generate a completely silent video with no voice, dialogue, ambience, sound effects, or music.",
-  "Do not change the room, add or remove furniture, move walls, invent doors or windows, alter the view, or introduce people, animals, text, logos, or watermarks.",
+  "Do not change the room, add or remove furniture, move walls, invent doors or windows, alter the view, move a door, window, curtain, or object, let the subject drift out of frame, or introduce people, animals, text, logos, or watermarks.",
 ].join(" ");
 
 function cleanDirection(value: unknown, fallback: string) {
@@ -229,8 +229,8 @@ async function submitVideoJobs(client: typeof fal, signedImages: string[], promp
       start_image_url: imageUrl,
       duration: String(FAL_CLIP_SECONDS) as "10",
       generate_audio: FAL_GENERATE_AUDIO,
-      negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, generic left-to-right pan, slideshow motion, static frame, visual step change, object reveal, lighting change, before-and-after effect, artificial light bloom, blur, distort, low quality, audio, voice, dialogue, music, people, animals, text, logo, watermark",
-      cfg_scale: 0.5,
+      negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, generic left-to-right pan, slideshow motion, static frame, static camera, frozen camera, motionless camera, no camera movement, visual step change, object reveal, lighting change, before-and-after effect, artificial light bloom, door opening, door closing, window opening, window closing, curtains moving, blinds moving, cabinet opening, cabinet closing, objects animating independently, self-moving objects, subject leaving frame, camera drifting away from main subject, blur, distort, low quality, audio, voice, dialogue, music, people, animals, text, logo, watermark",
+      cfg_scale: 0.6,
     },
     webhookUrl: FAL_WEBHOOK_URL,
   })));
