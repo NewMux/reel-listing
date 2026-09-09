@@ -27,6 +27,7 @@ export type RenderStatusSnapshot = {
   finalVideoUrl: string | null;
   generatedPrompts: (string | null)[];
   clipUrls: (string | null)[];
+  clipDurations: (number | null)[];
   shots: Shot[];
   error: string | null;
 };
@@ -100,6 +101,7 @@ export function buildRenderSnapshot(input: {
   generatedPrompts?: (string | null)[] | null;
   falRequestIds?: (string | null)[] | null;
   clipUrls?: (string | null)[] | null;
+  clipDurations?: (number | null)[] | null;
   renderProgress?: number | null;
   renderPhase?: RenderStatusSnapshot["phase"] | "idle" | null;
   renderError?: string | null;
@@ -108,6 +110,7 @@ export function buildRenderSnapshot(input: {
   const generatedPrompts = input.generatedPrompts || [];
   const requestIds = input.falRequestIds || [];
   const clipUrls = input.clipUrls || [];
+  const clipDurations = input.clipDurations || [];
   const totalShots = input.mediaUrls.length;
   const completedPrompts = generatedPrompts.filter(Boolean).length;
   const normalizedStatus = input.status === "Done" ? "Done" : input.status === "Processing" ? "Processing" : "Review";
@@ -157,6 +160,7 @@ export function buildRenderSnapshot(input: {
     finalVideoUrl: input.finalVideoUrl || null,
     generatedPrompts,
     clipUrls,
+    clipDurations,
     shots: makeShots(input.mediaUrls, clipUrls, requestIds, phase, generatedPrompts),
     error: input.renderError || null,
   };
@@ -188,6 +192,7 @@ export function getProjectRenderStatus(project: VideoProject) {
     generatedPrompts: project.generatedPrompts,
     falRequestIds: project.falRequestIds,
     clipUrls: project.clipUrls,
+    clipDurations: project.clipDurations,
     renderProgress: project.renderProgress,
     renderPhase: project.renderPhase,
     renderError: project.renderError,

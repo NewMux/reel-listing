@@ -58,7 +58,7 @@ export default function ProjectDetail() {
     setRenderError(null);
     setDeliveryNotice(null);
     try {
-      const finalBlob = await stitchClips(clipUrls as string[], progress => setAssemblyProgress(progress));
+      const finalBlob = await stitchClips(clipUrls as string[], render.data?.clipDurations || [], progress => setAssemblyProgress(progress));
       const target = await createOutputTarget.mutateAsync({ name: `${safeFileName(project.data?.title || "reel-listing-film")}.mp4`, type: "video/mp4" });
       await withRetry(async () => {
         const upload = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": "video/mp4" }, body: finalBlob });

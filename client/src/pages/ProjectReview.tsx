@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Clock3, Loader2, MessageSquareText, Sparkles } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
 import { AppSidebar, StatusPill } from "@/components/AppChrome";
@@ -39,13 +39,38 @@ export default function ProjectReview() {
   const reorder = trpc.projects.reorder.useMutation({
     onSuccess: () => utils.projects.get.invalidate({ id }),
   });
+  const updateShotOverride = trpc.projects.updateShotOverride.useMutation({
+    onSuccess: () => utils.projects.shotDirections.invalidate({ id }),
+  });
+
+  // Local drafts for the camera-move textareas: seeded once per photo the first time real
+  // AI/override data arrives, then left alone -- otherwise the 2s classification poll would
+  // wipe out whatever the user is mid-typing.
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const seededRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    const shotAnalysis = shotDirections.data?.shotAnalysis;
+    const customCameraMoves = shotDirections.data?.customCameraMoves;
+    if (!shotAnalysis) return;
+    const toSeed: Record<number, string> = {};
+    let changed = false;
+    shotAnalysis.forEach((analysis, index) => {
+      if (seededRef.current.has(index) || (!analysis && !customCameraMoves?.[index])) return;
+      seededRef.current.add(index);
+      toSeed[index] = customCameraMoves?.[index] || analysis?.cameraMove || "";
+      changed = true;
+    });
+    if (changed) setDrafts(prev => ({ ...prev, ...toSeed }));
+  }, [shotDirections.data]);
 
   if (project.isLoading) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.loading}</div></AppSidebar>;
   if (!project.data) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.projectNotFound}</div></AppSidebar>;
   const data = project.data;
   const shots = shotDirections.data?.shots;
   const clipCount = data.mediaUrls.length;
-  const duration = clipCount * FAL_CLIP_SECONDS;
+  const durations = data.mediaUrls.map((_, index) => shotDirections.data?.clipDurations?.[index] || FAL_CLIP_SECONDS);
+  const duration = durations.reduce((sum, seconds) => sum + seconds, 0);
+  const eachLabel = durations.every(seconds => seconds === durations[0]) ? `${durations[0]}s` : "5–10s";
   const canReorder = data.status === "Review";
   const moveShot = (index: number, direction: -1 | 1) => {
     const nextIndex = index + direction;
@@ -68,7 +93,7 @@ export default function ProjectReview() {
 
             <div className="mt-8 rounded-[22px] bg-[#F0E3DC] p-5">
               <div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-[#E9C6B2] text-[#653215]"><Sparkles size={17} /></span><div><p className="text-sm font-bold text-[#463328]">{data.title}</p><p className="mt-0.5 text-xs text-[#7B706A]">{data.location}</p></div></div>
-              <div className="mt-5 grid grid-cols-3 gap-2 border-t border-[#D1AF9C] pt-4"><div><p className="text-lg font-bold tracking-[-.04em] text-[#53321F]">{clipCount}</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#806B5F]">{t.review.clipsLabel}</p></div><div><p className="text-lg font-bold tracking-[-.04em] text-[#53321F]">{FAL_CLIP_SECONDS}s</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#806B5F]">{t.review.eachLabel}</p></div><div><p className="text-lg font-bold tracking-[-.04em] text-[#53321F]">~{duration}s</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#806B5F]">{t.review.finalReelLabel}</p></div></div>
+              <div className="mt-5 grid grid-cols-3 gap-2 border-t border-[#D1AF9C] pt-4"><div><p className="text-lg font-bold tracking-[-.04em] text-[#53321F]">{clipCount}</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#806B5F]">{t.review.clipsLabel}</p></div><div><p className="text-lg font-bold tracking-[-.04em] text-[#53321F]">{eachLabel}</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#806B5F]">{t.review.eachLabel}</p></div><div><p className="text-lg font-bold tracking-[-.04em] text-[#53321F]">~{duration}s</p><p className="mt-0.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#806B5F]">{t.review.finalReelLabel}</p></div></div>
             </div>
 
             <div className="mt-5 flex items-start gap-3 rounded-2xl border border-[#251811]/8 bg-white/70 p-4 text-sm leading-6 text-[#756B65]"><Clock3 size={17} className="mt-0.5 shrink-0 text-[#825E49]" />{t.review.orderNote}</div>
@@ -86,7 +111,56 @@ export default function ProjectReview() {
               ))}
             </div>
 
-            <div className="mt-7 rounded-2xl border border-[#251811]/8 bg-[#F8F5F3] p-4"><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.1em] text-[#825E49]"><Sparkles size={14} />{t.review.storyboard}</div><div className="mt-3 grid gap-2 sm:grid-cols-2">{data.mediaUrls.map((_, index) => <div key={index} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2.5"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#E9C6B2] text-[10px] font-bold text-[#6B422A]">{index + 1}</span><span className="line-clamp-2 flex-1 text-xs font-semibold text-[#604E44]">{shots ? shots[index]?.prompt : t.review.analyzing}</span><span className="ms-auto shrink-0 text-[10px] font-bold text-[#9C9692]">{FAL_CLIP_SECONDS}s</span></div>)}</div></div>
+            <div className="mt-7 rounded-2xl border border-[#251811]/8 bg-[#F8F5F3] p-4">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.1em] text-[#825E49]"><Sparkles size={14} />{t.review.storyboard}</div>
+              <div className="mt-3 space-y-2.5">
+                {data.mediaUrls.map((_, index) => {
+                  const hasOverride = !!shotDirections.data?.customCameraMoves?.[index];
+                  const analysisReady = !!shotDirections.data?.shotAnalysis?.[index];
+                  const activeDuration = shotDirections.data?.clipDurations?.[index] || 10;
+                  return (
+                    <div key={index} className="rounded-xl bg-white p-3">
+                      <div className="flex items-center gap-2">
+                        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#E9C6B2] text-[10px] font-bold text-[#6B422A]">{index + 1}</span>
+                        <p className="flex-1 truncate text-xs font-bold text-[#4C3B31]">{shots ? shots[index]?.roomType : t.review.analyzing}</p>
+                        {hasOverride && <span className="shrink-0 rounded-full bg-[#E9C6B2] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[.06em] text-[#6B422A]">{t.review.customBadge}</span>}
+                        <div className="flex shrink-0 gap-1">
+                          {([5, 10] as const).map(seconds => (
+                            <button
+                              key={seconds}
+                              type="button"
+                              disabled={!canReorder || updateShotOverride.isPending}
+                              onClick={() => updateShotOverride.mutate({ id, index, durationSeconds: seconds })}
+                              className={`h-7 rounded-full px-2.5 text-[10px] font-bold transition ${activeDuration === seconds ? "bg-[#251811] text-white" : "bg-[#F3EBE7] text-[#795E4E] hover:bg-[#EADFD9]"} disabled:opacity-50`}
+                            >{seconds}s</button>
+                          ))}
+                        </div>
+                      </div>
+                      <textarea
+                        value={drafts[index] ?? ""}
+                        onChange={event => setDrafts(prev => ({ ...prev, [index]: event.target.value }))}
+                        onBlur={() => updateShotOverride.mutate({ id, index, cameraMove: (drafts[index] ?? "").trim() || null })}
+                        disabled={!canReorder || !analysisReady}
+                        placeholder={analysisReady ? t.review.cameraMovePlaceholder : t.review.analyzing}
+                        rows={2}
+                        className="mt-2 w-full resize-none rounded-lg border border-[#251811]/8 bg-[#FAF8F7] p-2 text-xs leading-5 text-[#604E44] outline-none placeholder:text-[#A49E9A] disabled:opacity-60"
+                      />
+                      {hasOverride && canReorder && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const suggestion = shotDirections.data?.shotAnalysis?.[index]?.cameraMove || "";
+                            setDrafts(prev => ({ ...prev, [index]: suggestion }));
+                            updateShotOverride.mutate({ id, index, cameraMove: null });
+                          }}
+                          className="mt-1.5 text-[10px] font-bold text-[#825E49] underline"
+                        >{t.review.resetToAi}</button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
 
             {data.revisionNotes && <div className="mt-5 rounded-xl bg-[#F7EDE7] p-3.5"><p className="text-[11px] font-bold uppercase tracking-[.1em] text-[#885334]">{t.review.changeSent}</p><p className="mt-1 text-sm leading-6 text-[#695347]">{data.revisionNotes}</p></div>}
 

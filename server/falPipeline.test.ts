@@ -69,4 +69,28 @@ describe("fal.ai prompt construction", () => {
     expect(prompt).toContain("Time of day is not clearly evident");
     expect(prompt).not.toContain("Time of day: unknown");
   });
+
+  it("lets a client's customCameraMoves override replace the AI-suggested cameraMove", () => {
+    const projectWithOverride = { ...project, customCameraMoves: ["a slow orbit around the pool, never crossing the water's edge"] } as VideoProject;
+    const prompt = buildCinematicPrompt(0, {
+      shotType: "outdoor-view",
+      timeOfDay: "midday",
+      cameraMove: "the AI's own suggestion that should be replaced",
+      lighting: "bright midday sun",
+      focus: "the pool",
+    }, projectWithOverride);
+
+    expect(prompt).toContain("a slow orbit around the pool, never crossing the water's edge");
+    expect(prompt).not.toContain("the AI's own suggestion that should be replaced");
+  });
+
+  it("interpolates the actual per-photo clip duration into the prompt", () => {
+    const project5s = { ...project, clipDurations: [5] } as VideoProject;
+    const prompt5s = buildCinematicPrompt(0, { shotType: "detail", timeOfDay: "unknown", cameraMove: "a lateral track", lighting: "stable light", focus: "the finish" }, project5s);
+    expect(prompt5s).toContain("Use one continuous 5-second camera move");
+
+    const project10s = { ...project, clipDurations: [10] } as VideoProject;
+    const prompt10s = buildCinematicPrompt(0, { shotType: "detail", timeOfDay: "unknown", cameraMove: "a lateral track", lighting: "stable light", focus: "the finish" }, project10s);
+    expect(prompt10s).toContain("Use one continuous 10-second camera move");
+  });
 });
