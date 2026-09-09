@@ -79,16 +79,20 @@ async function runWithProgress(
 }
 
 // Chains xfade transitions across every clip: [0:v][1:v]xfade=...offset=O1[v1];[v1][2:v]xfade=...offset=O2[v2];...
-// Every clip has the same forced duration (see normalizeClip's -t flag), so each transition's
-// offset is deterministic: the i-th crossfade starts i * (clipDuration - transitionSeconds) in.
-function buildCrossfadeFilter(clipCount: number, clipDuration: number, transitionSeconds: number) {
+// Clips can now have different lengths (per-photo 5s/10s), so offsets are no longer a flat
+// i * (duration - transitionSeconds) -- each offset is where, in the merged stream built so
+// far, the next clip's transition should start: the running total of clip durations already
+// merged, minus one transitionSeconds overlap per transition already applied.
+function buildCrossfadeFilter(durations: number[], transitionSeconds: number) {
   const stages: string[] = [];
   let previousLabel = "0:v";
-  for (let index = 1; index < clipCount; index += 1) {
-    const offset = index * (clipDuration - transitionSeconds);
-    const outputLabel = index === clipCount - 1 ? "vout" : `v${index}`;
+  let cumulative = durations[0];
+  for (let index = 1; index < durations.length; index += 1) {
+    const offset = cumulative - transitionSeconds;
+    const outputLabel = index === durations.length - 1 ? "vout" : `v${index}`;
     stages.push(`[${previousLabel}][${index}:v]xfade=transition=fade:duration=${transitionSeconds}:offset=${offset.toFixed(2)}[${outputLabel}]`);
     previousLabel = outputLabel;
+    cumulative = cumulative + durations[index] - transitionSeconds;
   }
   return stages.join(";");
 }
@@ -101,6 +105,7 @@ async function normalizeClip(
   engine: FFmpeg,
   source: string,
   output: string,
+  duration: number,
   onProgress: (progress: StitchProgress) => void,
   start: number,
   end: number,
@@ -111,7 +116,7 @@ async function normalizeClip(
     "-an",
     "-vf", "scale=720:-2:flags=lanczos,setsar=1,format=yuv420p",
     "-r", "24",
-    "-t", String(FAL_CLIP_SECONDS),
+    "-t", String(duration),
     "-pix_fmt", "yuv420p",
     "-movflags", "+faststart",
     output,
@@ -144,11 +149,13 @@ async function normalizeClip(
 
 export async function stitchClips(
   clipUrls: string[],
+  clipDurations: (number | null)[],
   onProgress: (progress: StitchProgress) => void,
 ) {
   if (clipUrls.length === 0 || clipUrls.some(url => !url)) {
     throw new Error("All generated clips must be ready before assembly.");
   }
+  const durations = clipUrls.map((_, index) => clipDurations[index] || FAL_CLIP_SECONDS);
 
   const engine = await getFFmpeg();
   const normalizedFiles: string[] = [];
@@ -161,6 +168,7 @@ export async function stitchClips(
       engine,
       sourceFilename,
       normalizedFilename,
+      durations[index],
       onProgress,
       12 + Math.round((index / clipUrls.length) * 72),
       12 + Math.round(((index + 1) / clipUrls.length) * 72),
@@ -178,7 +186,7 @@ export async function stitchClips(
     }
   } else {
     onProgress({ progress: 86, currentStep: "Blending clips into a cinematic dissolve…" });
-    const filterComplex = buildCrossfadeFilter(normalizedFiles.length, FAL_CLIP_SECONDS, TRANSITION_SECONDS);
+    const filterComplex = buildCrossfadeFilter(durations, TRANSITION_SECONDS);
     const inputArgs = normalizedFiles.flatMap(filename => ["-i", filename]);
     const commonArgs = [
       "-y",

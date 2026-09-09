@@ -28,7 +28,7 @@ import {
 import { signStoredUrl, storageCreatePutTarget, storageGetSignedUrl } from "./storage";
 import { appendUploadChunk, createUploadSession, finalizeUploadSession } from "./uploadSessions";
 import { getProjectRenderStatus, getShotPlan } from "./renderPipeline";
-import { refreshFalRender, refreshShotClassification, submitFalRender, submitShotClassification } from "./falPipeline";
+import { buildCinematicPrompt, refreshFalRender, refreshShotClassification, submitFalRender, submitShotClassification } from "./falPipeline";
 
 const fileSchema = z.object({
   name: z.string().min(1).max(240),
@@ -45,6 +45,11 @@ function projectIdInput(id: number) {
 
 function isPilotMediaKey(key: string) {
   return key.startsWith("pilot:");
+}
+
+function asOverrideArray<T>(value: (T | null)[] | null | undefined, length: number): (T | null)[] {
+  const source = value || [];
+  return Array.from({ length }, (_, index) => source[index] ?? null);
 }
 
 function clientIp(req: { headers: Record<string, string | string[] | undefined>; socket: { remoteAddress?: string } }) {
@@ -337,15 +342,55 @@ export const appRouter = router({
         projectIdInput(input.id);
         const project = await getVideoProject(ctx.user.id, input.id);
         if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+        const overrides = { customCameraMoves: project.customCameraMoves || [], clipDurations: project.clipDurations || [] };
         if (project.status !== "Review" || !project.promptRequestIds?.length) {
-          return { shots: getShotPlan(project.mediaUrls, project.generatedPrompts || []), ready: true };
+          return { shots: getShotPlan(project.mediaUrls, project.generatedPrompts || []), shotAnalysis: project.shotAnalysis || [], ready: true, ...overrides };
         }
         try {
           const { generatedPrompts, ready } = await refreshShotClassification(ctx.user.id, project, ctx.supabaseAccessToken);
-          return { shots: getShotPlan(project.mediaUrls, generatedPrompts), ready };
+          const refreshed = await getVideoProject(ctx.user.id, input.id);
+          return { shots: getShotPlan(project.mediaUrls, generatedPrompts), shotAnalysis: refreshed?.shotAnalysis || [], ready, ...overrides };
         } catch (error) {
           console.error(`[Projects] shotDirections refresh failed for project ${input.id}:`, error);
-          return { shots: getShotPlan(project.mediaUrls, project.generatedPrompts || []), ready: false };
+          return { shots: getShotPlan(project.mediaUrls, project.generatedPrompts || []), shotAnalysis: project.shotAnalysis || [], ready: false, ...overrides };
+        }
+      }),
+    updateShotOverride: protectedProcedure
+      .input(z.object({
+        id: z.number().int().positive(),
+        index: z.number().int().nonnegative(),
+        cameraMove: z.string().trim().max(360).nullable().optional(),
+        durationSeconds: z.union([z.literal(5), z.literal(10)]).nullable().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        projectIdInput(input.id);
+        const project = await getVideoProject(ctx.user.id, input.id);
+        if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+        try {
+          if (project.status !== "Review") {
+            throw new Error("Camera direction and length can only be edited before production starts.");
+          }
+          if (input.index >= project.mediaUrls.length) {
+            throw new Error("Invalid photo.");
+          }
+          const customCameraMoves = asOverrideArray(project.customCameraMoves, project.mediaUrls.length);
+          const clipDurations = asOverrideArray(project.clipDurations, project.mediaUrls.length);
+          if (input.cameraMove !== undefined) customCameraMoves[input.index] = input.cameraMove || null;
+          if (input.durationSeconds !== undefined) clipDurations[input.index] = input.durationSeconds;
+
+          const updatedProject = { ...project, customCameraMoves, clipDurations };
+          const shotAnalysis = project.shotAnalysis?.[input.index];
+          const generatedPrompts = project.generatedPrompts ? [...project.generatedPrompts] : [];
+          // Rebuild this one photo's prompt immediately from its already-persisted shotAnalysis --
+          // no fal.ai call needed, so editing an override is instant and free.
+          if (shotAnalysis) generatedPrompts[input.index] = buildCinematicPrompt(input.index, shotAnalysis, updatedProject);
+
+          const updated = await updateVideoProject(ctx.user.id, input.id, { customCameraMoves, clipDurations, generatedPrompts });
+          if (!updated) throw new Error("The project could not be updated.");
+          return { shots: getShotPlan(updated.mediaUrls, updated.generatedPrompts || []), shotAnalysis: updated.shotAnalysis || [], customCameraMoves: updated.customCameraMoves || [], clipDurations: updated.clipDurations || [], ready: true };
+        } catch (error) {
+          console.error(`[Projects] updateShotOverride failed for project ${input.id}, index ${input.index}:`, error);
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to update this shot." });
         }
       }),
     complete: protectedProcedure

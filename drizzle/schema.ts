@@ -19,6 +19,8 @@ export const users = pgTable("users", {
   lastSignedIn: timestamp("lastSignedIn", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export type ShotAnalysis = { shotType: string; timeOfDay: string; cameraMove: string; lighting: string; focus: string };
+
 export const videoProjects = pgTable(
   "video_projects",
   {
@@ -36,6 +38,17 @@ export const videoProjects = pgTable(
     finalVideoUrl: text("finalVideoUrl"),
     promptRequestIds: jsonb("promptRequestIds").$type<(string | null)[]>().default([]),
     generatedPrompts: jsonb("generatedPrompts").$type<(string | null)[]>().default([]),
+    // Parsed per-photo vision output (shotType/timeOfDay/cameraMove/lighting/focus), persisted
+    // separately from generatedPrompts so a client's customCameraMoves override can be applied
+    // (or changed) and generatedPrompts rebuilt from it without paying for reclassification.
+    shotAnalysis: jsonb("shotAnalysis").$type<(ShotAnalysis | null)[]>().default([]),
+    // A client-supplied camera-move override per photo; null means use shotAnalysis[index]'s
+    // AI-suggested cameraMove. Every other shotAnalysis field (shotType, lighting, etc.) and all
+    // of CINEMATIC_LOCK's safety/style rules still apply -- this only replaces the movement text.
+    customCameraMoves: jsonb("customCameraMoves").$type<(string | null)[]>().default([]),
+    // Per-photo clip length in seconds; null defaults to FAL_CLIP_SECONDS (10). Kling only
+    // accepts "5" or "10" as a duration, so this is a toggle, not a free value.
+    clipDurations: jsonb("clipDurations").$type<(number | null)[]>().default([]),
     falRequestIds: jsonb("falRequestIds").$type<(string | null)[]>().default([]),
     clipUrls: jsonb("clipUrls").$type<(string | null)[]>().default([]),
     renderProgress: integer("renderProgress").default(0).notNull(),

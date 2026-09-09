@@ -1,5 +1,5 @@
 import { fal } from "@fal-ai/client";
-import type { VideoProject } from "../drizzle/schema";
+import type { ShotAnalysis, VideoProject } from "../drizzle/schema";
 import {
   FAL_CLIP_SECONDS,
   FAL_GENERATE_AUDIO,
@@ -13,18 +13,22 @@ import { getProjectRenderStatus, type RenderStatusSnapshot } from "./renderPipel
 import { storageGetSignedUrl } from "./storage";
 import { updateVideoProject } from "./db";
 
-const VISION_SYSTEM_PROMPT = [
-  "You are the shot designer for a premium architectural real-estate film.",
-  "Analyze only the attached property photo and return one JSON object with exactly these string keys: shotType, confidence, timeOfDay, cameraMove, lighting, focus.",
-  "shotType must be one of: outdoor-view, living-room, kitchen-dining, bedroom, bathroom, detail, unknown.",
-  "confidence must be one of: high, medium, low. Use low whenever the room type is not clearly supported by visible evidence.",
-  "timeOfDay must be one of: morning, midday, afternoon, evening, night, unknown. Infer it only from visible cues such as sky tone, shadow length, window light color, or interior artificial lighting. Use unknown whenever the photo has no reliable time-of-day evidence, such as an interior shot with no visible windows or sky.",
-  "cameraMove must describe the one grounded, physically plausible ten-second eye-level move that best fits this specific photo's actual room type and composition -- freely choose among a forward gimbal push, backward pull, lateral track, diagonal travel, gentle arc around a focal feature, side-to-side glide, corner-to-corner travel, or short dolly move based on what genuinely suits the space (for example an arc for a kitchen island, a forward glide for a hallway or entrance, a lateral track for a wide living area, a backward reveal for a compact room), not by rotating through a fixed list.",
-  "lighting must describe only light behavior visible or safely implied by the reference image, and must remain consistent with the detected timeOfDay.",
-  "focus must name one visible architectural or lifestyle feature without inventing anything.",
-  "Never claim a room or object that is not clearly visible. If uncertain, use unknown and neutral language.",
-  "Never choose a crane, lift, drop, tilt, overhead, drone, low-to-high angle, high-to-low angle, orbit, spin, or floating camera move. Return JSON only. No markdown, title, explanation, or extra keys.",
-].join(" ");
+// Clip length is now per-photo (project.clipDurations), so any prompt text that names the
+// duration has to be built per-index instead of being a flat constant.
+function visionSystemPrompt(durationSeconds: number) {
+  return [
+    "You are the shot designer for a premium architectural real-estate film.",
+    "Analyze only the attached property photo and return one JSON object with exactly these string keys: shotType, confidence, timeOfDay, cameraMove, lighting, focus.",
+    "shotType must be one of: outdoor-view, living-room, kitchen-dining, bedroom, bathroom, detail, unknown.",
+    "confidence must be one of: high, medium, low. Use low whenever the room type is not clearly supported by visible evidence.",
+    "timeOfDay must be one of: morning, midday, afternoon, evening, night, unknown. Infer it only from visible cues such as sky tone, shadow length, window light color, or interior artificial lighting. Use unknown whenever the photo has no reliable time-of-day evidence, such as an interior shot with no visible windows or sky.",
+    `cameraMove must describe the one grounded, physically plausible ${durationSeconds}-second eye-level move that best fits this specific photo's actual room type and composition -- freely choose among a forward gimbal push, backward pull, lateral track, diagonal travel, gentle arc around a focal feature, side-to-side glide, corner-to-corner travel, or short dolly move based on what genuinely suits the space (for example an arc for a kitchen island, a forward glide for a hallway or entrance, a lateral track for a wide living area, a backward reveal for a compact room), not by rotating through a fixed list.`,
+    "lighting must describe only light behavior visible or safely implied by the reference image, and must remain consistent with the detected timeOfDay.",
+    "focus must name one visible architectural or lifestyle feature without inventing anything.",
+    "Never claim a room or object that is not clearly visible. If uncertain, use unknown and neutral language.",
+    "Never choose a crane, lift, drop, tilt, overhead, drone, low-to-high angle, high-to-low angle, orbit, spin, or floating camera move. Return JSON only. No markdown, title, explanation, or extra keys.",
+  ].join(" ");
+}
 
 const MOVEMENT_DIRECTIVES = [
   "a forward gimbal push toward the strongest depth line",
@@ -39,16 +43,22 @@ const MOVEMENT_DIRECTIVES = [
   "a short eye-level dolly move toward the nearest visible material plane",
 ] as const;
 
-const CINEMATIC_LOCK = [
-  "Use the supplied image as the exact first frame and preserve its room, architecture, furniture, finishes, windows, landscaping, horizon, and proportions.",
-  "Create a premium editorial property-film shot with a natural architectural perspective, restrained luxury, realistic exposure, subtle depth, and believable parallax.",
-  "Use one continuous ten-second camera move that starts immediately on the first frame, with a single physically plausible grounded forward, lateral, diagonal, or shallow arcing travel at constant camera height selected to suit the composition, sustained parallax through the middle, and natural motion through the final frame.",
-  "The camera should feel as if it is operated on a stabilized professional gimbal at eye level, with purposeful grounded movement from start to finish, constant height, smooth acceleration and deceleration, no static opening or closing hold, no abrupt changes, and no presentation-style slideshow motion; movement stays visibly active throughout, never settling still mid-shot.",
-  "Use a rectilinear 24–35mm architectural-lens look with straight verticals; no handheld shake, snap zoom, whip pan, time lapse, orbiting spin, or exaggerated lens distortion.",
-  "Keep the shot camera-led and continuous. Do not stage a sequence of visual steps, object reveals, lighting changes, before-and-after moments, or artificial scene progression. Do not make the camera orbit, spin, or float through walls. Allow only minimal natural movement already supported by the image.",
-  "No audio. Generate a completely silent video with no voice, dialogue, ambience, sound effects, or music.",
-  "Do not change the room, add or remove furniture, move walls, invent doors or windows, alter the view, move a door, window, curtain, or object, let the subject drift out of frame, or introduce people, animals, text, logos, or watermarks.",
-].join(" ");
+function cinematicLock(durationSeconds: number) {
+  return [
+    "Use the supplied image as the exact first frame and preserve its room, architecture, furniture, finishes, windows, landscaping, horizon, and proportions.",
+    "Create a premium editorial property-film shot with a natural architectural perspective, restrained luxury, realistic exposure, subtle depth, and believable parallax.",
+    `Use one continuous ${durationSeconds}-second camera move that starts immediately on the first frame, with a single physically plausible grounded forward, lateral, diagonal, or shallow arcing travel at constant camera height selected to suit the composition, sustained parallax through the middle, and natural motion through the final frame.`,
+    "The camera should feel as if it is operated on a stabilized professional gimbal at eye level, with purposeful grounded movement from start to finish, constant height, smooth acceleration and deceleration, no static opening or closing hold, no abrupt changes, and no presentation-style slideshow motion; movement stays visibly active throughout, never settling still mid-shot.",
+    "Use a rectilinear 24–35mm architectural-lens look with straight verticals; no handheld shake, snap zoom, whip pan, time lapse, orbiting spin, or exaggerated lens distortion.",
+    "Keep the shot camera-led and continuous. Do not stage a sequence of visual steps, object reveals, lighting changes, before-and-after moments, or artificial scene progression. Do not make the camera orbit, spin, or float through walls. Allow only minimal natural movement already supported by the image.",
+    "No audio. Generate a completely silent video with no voice, dialogue, ambience, sound effects, or music.",
+    "Do not change the room, add or remove furniture, move walls, invent doors or windows, alter the view, move a door, window, curtain, or object, let the subject drift out of frame, or introduce people, animals, text, logos, or watermarks.",
+  ].join(" ");
+}
+
+function clipDuration(project: VideoProject, index: number) {
+  return project.clipDurations?.[index] ?? FAL_CLIP_SECONDS;
+}
 
 function cleanDirection(value: unknown, fallback: string) {
   if (typeof value !== "string") return fallback;
@@ -124,18 +134,22 @@ function fallbackDirection(index: number) {
   return directions[index % directions.length];
 }
 
-export function buildCinematicPrompt(index: number, direction: { shotType: string; timeOfDay: string; cameraMove: string; lighting: string; focus: string }, project: VideoProject) {
-  const cameraMove = compactDirection(direction.cameraMove, 220);
+export function buildCinematicPrompt(index: number, direction: ShotAnalysis, project: VideoProject) {
+  // A client-supplied camera-move override (Review page) replaces only this one field -- every
+  // other shotAnalysis field and all of cinematicLock's safety/style rules still apply.
+  const cameraMoveSource = project.customCameraMoves?.[index] || direction.cameraMove;
+  const cameraMove = compactDirection(cameraMoveSource, 220);
   const lighting = compactDirection(direction.lighting, 140);
   const focus = compactDirection(direction.focus, 140);
+  const duration = clipDuration(project, index);
   // Ordered by how badly the render suffers if limitPrompt has to truncate the tail: the
   // per-photo camera choreography is the entire point of the vision-classification pipeline
-  // and must never be cut, so it goes immediately after the fixed CINEMATIC_LOCK rules --
+  // and must never be cut, so it goes immediately after the fixed cinematicLock rules --
   // ahead of shot type/time-of-day/light/focus, which degrade gracefully with a generic
   // fallback if trimmed, and well ahead of the closing reinforcement line, which is pure
   // restatement and safe to lose first.
   return limitPrompt([
-    CINEMATIC_LOCK,
+    cinematicLock(duration),
     `Camera choreography -- the movement chosen specifically for this room, not a repeated generic lateral pan: ${cameraMove}.`,
     direction.timeOfDay === "unknown"
       ? "Time of day is not clearly evident from the photo; keep the lighting exactly as shown without implying a specific time of day."
@@ -174,7 +188,7 @@ function propertyContext(project: VideoProject) {
 
 function fallbackPrompt(index: number, project: VideoProject) {
   return [
-    CINEMATIC_LOCK,
+    cinematicLock(clipDuration(project, index)),
     `This is fallback shot ${index + 1} in a ${project.mediaUrls.length}-shot property film for ${propertyContext(project)}.`,
     "Use a smooth grounded eye-level gimbal push, lateral track, or shallow arc selected to suit the visible composition, with realistic parallax and a composed editorial finish.",
   ].join(" ");
@@ -185,30 +199,34 @@ function promptInstruction(index: number, project: VideoProject) {
     `This is property photo ${index + 1} of a ${project.mediaUrls.length}-photo listing sequence.`,
     `Listing context: ${propertyContext(project)}.`,
     "Choose the camera move that best fits this specific photo's room type and composition -- do not default to a generic lateral pan, and do not add a second movement or a visual step sequence.",
-    "Analyze the attached image and return the requested JSON shot design. The final clip will be ten seconds long.",
+    `Analyze the attached image and return the requested JSON shot design. The final clip will be ${clipDuration(project, index)} seconds long.`,
     "Use only visible evidence. The shot design must prioritize exact-image preservation over decorative description.",
   ].join(" ");
 }
 
-function normalizeDirection(value: unknown, index: number, project: VideoProject) {
+// Parses the vision model's raw response into a normalized ShotAnalysis -- always returns a
+// usable direction (falling back to fallbackDirection's canned data whenever anything is
+// missing or unparseable), never null, matching this function's previous all-in-one behavior.
+// Deliberately separate from prompt-building: the result gets persisted (shotAnalysis) so a
+// later customCameraMoves edit can rebuild the prompt from it without paying for reclassification.
+function parseDirection(value: unknown, index: number): ShotAnalysis {
   const fallback = fallbackDirection(index);
-  if (!value || typeof value !== "object") return buildCinematicPrompt(index, fallback, project);
+  if (!value || typeof value !== "object") return fallback;
   const output = (value as { output?: unknown }).output;
-  if (typeof output !== "string") return buildCinematicPrompt(index, fallback, project);
+  if (typeof output !== "string") return fallback;
   const cleaned = output.replace(/^```(?:json|text)?\s*/i, "").replace(/\s*```$/i, "").trim();
   try {
     const parsed = JSON.parse(cleaned) as { shotType?: unknown; confidence?: unknown; timeOfDay?: unknown; cameraMove?: unknown; lighting?: unknown; focus?: unknown };
     const confidence = normalizeConfidence(parsed.confidence);
-    const direction = {
+    return {
       shotType: normalizeShotType(parsed.shotType, confidence),
       timeOfDay: normalizeTimeOfDay(parsed.timeOfDay),
       cameraMove: cleanDirection(parsed.cameraMove, fallback.cameraMove),
       lighting: cleanDirection(parsed.lighting, fallback.lighting),
       focus: cleanDirection(parsed.focus, fallback.focus),
     };
-    return buildCinematicPrompt(index, direction, project);
   } catch {
-    return buildCinematicPrompt(index, { ...fallback, cameraMove: cleanDirection(cleaned, fallback.cameraMove) }, project);
+    return { ...fallback, cameraMove: cleanDirection(cleaned, fallback.cameraMove) };
   }
 }
 
@@ -223,6 +241,14 @@ function asStringArray(value: unknown, length: number) {
   return Array.from({ length }, (_, index) => typeof value[index] === "string" ? value[index] : null);
 }
 
+function asShotAnalysisArray(value: unknown, length: number) {
+  if (!Array.isArray(value)) return Array.from({ length }, () => null as ShotAnalysis | null);
+  return Array.from({ length }, (_, index) => {
+    const entry = value[index];
+    return entry && typeof entry === "object" ? entry as ShotAnalysis : null;
+  });
+}
+
 function allReady(values: (string | null)[], length: number) {
   return values.length === length && values.every(Boolean);
 }
@@ -232,7 +258,7 @@ async function submitVisionPromptJobs(client: typeof fal, signedImages: string[]
     input: {
       image_urls: [imageUrl],
       prompt: promptInstruction(index, project),
-      system_prompt: VISION_SYSTEM_PROMPT,
+      system_prompt: visionSystemPrompt(clipDuration(project, index)),
       model: FAL_VISION_LLM_MODEL,
       temperature: 0.2,
       max_tokens: 260,
@@ -242,12 +268,12 @@ async function submitVisionPromptJobs(client: typeof fal, signedImages: string[]
   return responses.map(response => response.request_id);
 }
 
-async function submitVideoJobs(client: typeof fal, signedImages: string[], prompts: string[]) {
+async function submitVideoJobs(client: typeof fal, signedImages: string[], prompts: string[], project: VideoProject) {
   const responses = await Promise.all(signedImages.map((imageUrl, index) => client.queue.submit(FAL_IMAGE_TO_VIDEO_MODEL, {
     input: {
       prompt: limitPrompt(prompts[index]),
       start_image_url: imageUrl,
-      duration: String(FAL_CLIP_SECONDS) as "10",
+      duration: String(clipDuration(project, index)) as "5" | "10",
       generate_audio: FAL_GENERATE_AUDIO,
       negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, generic left-to-right pan, slideshow motion, static frame, static camera, frozen camera, motionless camera, no camera movement, visual step change, object reveal, lighting change, before-and-after effect, artificial light bloom, door opening, door closing, window opening, window closing, curtains moving, blinds moving, cabinet opening, cabinet closing, objects animating independently, self-moving objects, subject leaving frame, camera drifting away from main subject, blur, distort, low quality, audio, voice, dialogue, music, people, animals, text, logo, watermark",
       cfg_scale: 0.6,
@@ -276,6 +302,7 @@ export async function submitShotClassification(userId: number, project: VideoPro
 export async function refreshShotClassification(userId: number, project: VideoProject, accessToken?: string | null) {
   const promptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
   const generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
+  const shotAnalysis = asShotAnalysisArray(project.shotAnalysis, project.mediaUrls.length);
   if (!promptRequestIds.some(Boolean) || allReady(generatedPrompts, project.mediaUrls.length)) {
     return { generatedPrompts, ready: allReady(generatedPrompts, project.mediaUrls.length) };
   }
@@ -287,14 +314,16 @@ export async function refreshShotClassification(userId: number, project: VideoPr
       const status = await client.queue.status(FAL_VISION_PROMPT_MODEL, { requestId, logs: false });
       if (status.status === "COMPLETED") {
         const result = await client.queue.result(FAL_VISION_PROMPT_MODEL, { requestId });
-        generatedPrompts[index] = normalizeDirection(result.data, index, project);
+        const direction = parseDirection(result.data, index);
+        shotAnalysis[index] = direction;
+        generatedPrompts[index] = buildCinematicPrompt(index, direction, project);
       }
     } catch (error) {
       console.error(`[FalPipeline] pre-approval classification poll failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
     }
   }));
 
-  await updateVideoProject(userId, project.id, { generatedPrompts });
+  await updateVideoProject(userId, project.id, { generatedPrompts, shotAnalysis });
   return { generatedPrompts, ready: allReady(generatedPrompts, project.mediaUrls.length) };
 }
 
@@ -309,10 +338,12 @@ export async function submitFalRender(userId: number, project: VideoProject, acc
   // polling picks up any still-pending prompts and falls through to video jobs once ready.
   let promptRequestIds = existingPromptRequestIds;
   let generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
+  let shotAnalysis = asShotAnalysisArray(project.shotAnalysis, project.mediaUrls.length);
   if (!alreadyClassifying) {
     const signedImages = await getFalSourceUrls(project, accessToken);
     promptRequestIds = await submitVisionPromptJobs(client, signedImages, project);
     generatedPrompts = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
+    shotAnalysis = Array.from({ length: project.mediaUrls.length }, () => null as ShotAnalysis | null);
   }
   const emptyClips = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
   const renderProgress = alreadyClassifying ? Math.round((generatedPrompts.filter(Boolean).length / project.mediaUrls.length) * 15) : 0;
@@ -320,6 +351,7 @@ export async function submitFalRender(userId: number, project: VideoProject, acc
   await updateVideoProject(userId, project.id, {
     promptRequestIds,
     generatedPrompts,
+    shotAnalysis,
     falRequestIds: [],
     clipUrls: emptyClips,
     renderProgress,
@@ -332,6 +364,7 @@ export async function submitFalRender(userId: number, project: VideoProject, acc
     status: "Processing",
     promptRequestIds,
     generatedPrompts,
+    shotAnalysis,
     falRequestIds: [],
     clipUrls: emptyClips,
     renderProgress,
@@ -343,6 +376,7 @@ export async function submitFalRender(userId: number, project: VideoProject, acc
 export async function refreshFalRender(userId: number, project: VideoProject, accessToken?: string | null): Promise<RenderStatusSnapshot> {
   const promptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
   const generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
+  const shotAnalysis = asShotAnalysisArray(project.shotAnalysis, project.mediaUrls.length);
   const client = getFalClient();
   let failedMessage: string | null = null;
 
@@ -354,7 +388,9 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
         const state = status.status as string;
         if (state === "COMPLETED") {
           const result = await client.queue.result(FAL_VISION_PROMPT_MODEL, { requestId });
-          generatedPrompts[index] = normalizeDirection(result.data, index, project);
+          const direction = parseDirection(result.data, index);
+          shotAnalysis[index] = direction;
+          generatedPrompts[index] = buildCinematicPrompt(index, direction, project);
           if (!generatedPrompts[index]) failedMessage = `fal.ai could not create direction for photo ${index + 1}.`;
         } else if (state === "FAILED") {
           failedMessage = `fal.ai could not create direction for photo ${index + 1}.`;
@@ -366,14 +402,14 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
     }));
 
     if (failedMessage) {
-      await updateVideoProject(userId, project.id, { generatedPrompts, renderProgress: Math.round((generatedPrompts.filter(Boolean).length / project.mediaUrls.length) * 15), renderPhase: "failed", renderError: failedMessage });
-      return getProjectRenderStatus({ ...project, promptRequestIds, generatedPrompts, renderProgress: 0, renderPhase: "failed", renderError: failedMessage });
+      await updateVideoProject(userId, project.id, { generatedPrompts, shotAnalysis, renderProgress: Math.round((generatedPrompts.filter(Boolean).length / project.mediaUrls.length) * 15), renderPhase: "failed", renderError: failedMessage });
+      return getProjectRenderStatus({ ...project, promptRequestIds, generatedPrompts, shotAnalysis, renderProgress: 0, renderPhase: "failed", renderError: failedMessage });
     }
 
     if (!allReady(generatedPrompts, project.mediaUrls.length)) {
       const progress = Math.round((generatedPrompts.filter(Boolean).length / project.mediaUrls.length) * 15);
-      await updateVideoProject(userId, project.id, { generatedPrompts, renderProgress: progress, renderPhase: "generating", renderError: null });
-      return getProjectRenderStatus({ ...project, promptRequestIds, generatedPrompts, renderProgress: progress, renderPhase: "generating", renderError: null });
+      await updateVideoProject(userId, project.id, { generatedPrompts, shotAnalysis, renderProgress: progress, renderPhase: "generating", renderError: null });
+      return getProjectRenderStatus({ ...project, promptRequestIds, generatedPrompts, shotAnalysis, renderProgress: progress, renderPhase: "generating", renderError: null });
     }
   }
 
@@ -386,7 +422,7 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
       ? await getFalSourceUrls(project, accessToken)
       : [];
     if (!signedImages.length) throw new Error("Property images could not be prepared for fal.ai.");
-    requestIds = await submitVideoJobs(client, signedImages, prompts);
+    requestIds = await submitVideoJobs(client, signedImages, prompts, project);
     await updateVideoProject(userId, project.id, {
       promptRequestIds,
       generatedPrompts: prompts,
