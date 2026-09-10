@@ -1,7 +1,17 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { and, desc, eq, gt, sql } from "drizzle-orm";
-import { contactMessages, InsertContactMessage, InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
+import {
+  contactMessages,
+  InsertContactMessage,
+  InsertSubscription,
+  InsertUser,
+  InsertVideoProject,
+  processedWebhookEvents,
+  subscriptions,
+  users,
+  videoProjects,
+} from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -55,6 +65,13 @@ export async function getUserByOpenId(openId: string) {
   return result[0];
 }
 
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
+}
+
 /** Atomically decrements the user's included-video quota. Returns the new count, or null if they have none left. */
 export async function decrementVideoQuota(userId: number): Promise<number | null> {
   const db = await getDb();
@@ -67,11 +84,18 @@ export async function decrementVideoQuota(userId: number): Promise<number | null
   return result[0]?.videosRemaining ?? null;
 }
 
-/** Refunds one video credit, used when a render fails to actually start after the quota was already spent. */
-export async function incrementVideoQuota(userId: number): Promise<void> {
+/** Refunds video credits, used when a render fails to actually start after the quota was already spent, or when a Paddle top-up purchase completes. */
+export async function incrementVideoQuota(userId: number, amount = 1): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ videosRemaining: sql`${users.videosRemaining} + 1` }).where(eq(users.id, userId));
+  await db.update(users).set({ videosRemaining: sql`${users.videosRemaining} + ${amount}` }).where(eq(users.id, userId));
+}
+
+/** Sets the user's video quota to an absolute value -- used for subscription grant/renewal, where the plan's quota replaces (not adds to) whatever was left. */
+export async function setUserQuota(userId: number, { videosRemaining, stagingCreditsRemaining }: { videosRemaining: number; stagingCreditsRemaining: number }): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(users).set({ videosRemaining, stagingCreditsRemaining, updatedAt: new Date() }).where(eq(users.id, userId));
 }
 
 /** Atomically decrements the user's virtual-staging credit balance. Returns the new count, or null if they have none left. */
@@ -86,11 +110,11 @@ export async function decrementStagingCredits(userId: number): Promise<number | 
   return result[0]?.stagingCreditsRemaining ?? null;
 }
 
-/** Refunds one staging credit, used when a staging attempt fails after the credit was already spent. */
-export async function incrementStagingCredits(userId: number): Promise<void> {
+/** Refunds staging credits, used when a staging attempt fails after the credit was already spent, or when a Paddle top-up purchase completes. */
+export async function incrementStagingCredits(userId: number, amount = 1): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ stagingCreditsRemaining: sql`${users.stagingCreditsRemaining} + 1` }).where(eq(users.id, userId));
+  await db.update(users).set({ stagingCreditsRemaining: sql`${users.stagingCreditsRemaining} + ${amount}` }).where(eq(users.id, userId));
 }
 
 export async function listVideoProjects(userId: number) {
@@ -153,4 +177,62 @@ export async function updateVideoProject(
     .set({ ...updates, updatedAt: new Date() })
     .where(and(eq(videoProjects.userId, userId), eq(videoProjects.id, projectId)));
   return getVideoProject(userId, projectId);
+}
+
+export async function setPaddleCustomerId(userId: number, paddleCustomerId: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(users).set({ paddleCustomerId, updatedAt: new Date() }).where(eq(users.id, userId));
+}
+
+export async function getUserByPaddleCustomerId(paddleCustomerId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.paddleCustomerId, paddleCustomerId)).limit(1);
+  return result[0];
+}
+
+export async function upsertSubscription(row: InsertSubscription): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Subscription storage is temporarily unavailable.");
+  await db
+    .insert(subscriptions)
+    .values(row)
+    .onConflictDoUpdate({
+      target: subscriptions.userId,
+      set: {
+        paddleSubscriptionId: row.paddleSubscriptionId,
+        paddlePriceId: row.paddlePriceId,
+        status: row.status,
+        currentPeriodEnd: row.currentPeriodEnd,
+        cancelAtPeriodEnd: row.cancelAtPeriodEnd,
+        updatedAt: new Date(),
+      },
+    });
+}
+
+export async function getSubscriptionByUserId(userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(subscriptions).where(eq(subscriptions.userId, userId)).limit(1);
+  return result[0];
+}
+
+/** Atomically claims a webhook event id for processing. Returns false if it was already claimed (duplicate/retried delivery), so the caller should treat that as a safe no-op. */
+export async function claimWebhookEvent(eventId: string, eventType: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) throw new Error("Webhook storage is temporarily unavailable.");
+  const result = await db
+    .insert(processedWebhookEvents)
+    .values({ eventId, eventType })
+    .onConflictDoNothing()
+    .returning({ eventId: processedWebhookEvents.eventId });
+  return result.length > 0;
+}
+
+/** Releases a previously claimed webhook event id, used when processing throws after a successful claim so a Paddle retry can reprocess instead of silently no-op'ing forever. */
+export async function releaseWebhookEvent(eventId: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(processedWebhookEvents).where(eq(processedWebhookEvents.eventId, eventId));
 }

@@ -1,9 +1,10 @@
-import { index, integer, jsonb, pgEnum, pgTable, serial, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgEnum, pgTable, serial, text, timestamp, varchar } from "drizzle-orm/pg-core";
 
 /** Core account record populated from Manus OAuth. */
 export const userRole = pgEnum("user_role", ["user", "admin"]);
 export const projectStatus = pgEnum("project_status", ["Uploading", "Processing", "Review", "Done"]);
 export const renderPhase = pgEnum("render_phase", ["idle", "generating", "assembly", "complete", "failed"]);
+export const subscriptionStatus = pgEnum("subscription_status", ["active", "trialing", "past_due", "paused", "canceled"]);
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -14,9 +15,39 @@ export const users = pgTable("users", {
   role: userRole("role").default("user").notNull(),
   videosRemaining: integer("videosRemaining").default(3).notNull(),
   stagingCreditsRemaining: integer("stagingCreditsRemaining").default(0).notNull(),
+  // Set once a user's first Paddle checkout completes; null means they've never subscribed/purchased.
+  paddleCustomerId: varchar("paddleCustomerId", { length: 64 }).unique(),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// One row per user's Paddle subscription. userId is unique -- Paddle Billing gives each customer
+// at most one subscription that matters for our purposes; a resubscribe/upgrade upserts this same
+// row rather than creating a second one.
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("userId").notNull().unique(),
+    paddleSubscriptionId: varchar("paddleSubscriptionId", { length: 64 }).notNull().unique(),
+    paddlePriceId: varchar("paddlePriceId", { length: 64 }).notNull(),
+    status: subscriptionStatus("status").notNull(),
+    currentPeriodEnd: timestamp("currentPeriodEnd", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancelAtPeriodEnd").default(false).notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => [index("subscriptions_user_idx").on(table.userId)],
+);
+
+// Idempotency ledger for Paddle webhook deliveries: a row here means that event id has already
+// been processed, so a Paddle retry (or a genuine duplicate delivery) is a safe no-op instead of
+// double-granting quota.
+export const processedWebhookEvents = pgTable("processed_webhook_events", {
+  eventId: varchar("eventId", { length: 64 }).primaryKey(),
+  eventType: varchar("eventType", { length: 64 }).notNull(),
+  processedAt: timestamp("processedAt", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export type ShotAnalysis = { shotType: string; timeOfDay: string; cameraMove: string; lighting: string; focus: string };
@@ -78,3 +109,5 @@ export type VideoProject = typeof videoProjects.$inferSelect;
 export type InsertVideoProject = typeof videoProjects.$inferInsert;
 export type ContactMessage = typeof contactMessages.$inferSelect;
 export type InsertContactMessage = typeof contactMessages.$inferInsert;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type InsertSubscription = typeof subscriptions.$inferInsert;

@@ -15,4 +15,9 @@ export const ENV = {
   publicUrl: process.env.PUBLIC_URL ?? "https://reel-listing.com",
   upstashRedisUrl: process.env.UPSTASH_REDIS_REST_URL ?? "",
   upstashRedisToken: process.env.UPSTASH_REDIS_REST_TOKEN ?? "",
+  paddleApiKey: process.env.PADDLE_API_KEY ?? "",
+  paddleWebhookSecret: process.env.PADDLE_WEBHOOK_SECRET ?? "",
+  paddleEnvironment: (process.env.PADDLE_ENVIRONMENT === "production" ? "production" : "sandbox") as "production" | "sandbox",
+  paddlePlansJson: process.env.PADDLE_PLANS_JSON ?? "",
+  paddleTopupsJson: process.env.PADDLE_TOPUPS_JSON ?? "",
 };

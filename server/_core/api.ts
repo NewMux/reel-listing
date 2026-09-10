@@ -3,11 +3,15 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { registerFalWebhook } from "./webhooks";
+import { registerPaddleWebhook } from "./paddleWebhook";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 
 export function createApiApp() {
   const app = express();
+  // Registered before the global body parsers below so this one route keeps its raw,
+  // unparsed body -- Paddle's webhook signature is computed over the raw bytes.
+  registerPaddleWebhook(app);
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);

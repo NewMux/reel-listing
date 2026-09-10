@@ -29,6 +29,7 @@ import { signStoredUrl, storageCreatePutTarget, storageGetSignedUrl } from "./st
 import { appendUploadChunk, createUploadSession, finalizeUploadSession } from "./uploadSessions";
 import { getProjectRenderStatus, getShotPlan } from "./renderPipeline";
 import { buildCinematicPrompt, refreshFalRender, refreshShotClassification, submitFalRender, submitShotClassification } from "./falPipeline";
+import { billingRouter } from "./billingRouter";
 
 const fileSchema = z.object({
   name: z.string().min(1).max(240),
@@ -455,6 +456,7 @@ export const appRouter = router({
         return storageCreatePutTarget(`property-projects/${ctx.user.id}/outputs/${Date.now()}-${safeName}`, ctx.supabaseAccessToken ?? undefined);
       }),
   }),
+  billing: billingRouter,
 });
 
 export type AppRouter = typeof appRouter;
