@@ -30,6 +30,12 @@ export type RenderStatusSnapshot = {
   clipDurations: (number | null)[];
   shots: Shot[];
   error: string | null;
+  /**
+   * True when the next batch of paid fal.ai jobs is due but has not been bought yet. The
+   * status endpoint only reports this; the client answers it with the advance mutation,
+   * which takes the project's render lock first so the purchase happens exactly once.
+   */
+  needsAdvance: boolean;
 };
 
 const SHOT_BLUEPRINTS = [
@@ -163,6 +169,7 @@ export function buildRenderSnapshot(input: {
     clipDurations,
     shots: makeShots(input.mediaUrls, clipUrls, requestIds, phase, generatedPrompts),
     error: input.renderError || null,
+    needsAdvance: false,
   };
 }
 

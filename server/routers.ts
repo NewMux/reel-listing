@@ -1,24 +1,30 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getPilotGallery, pilotGalleryIds } from "../shared/pilotGalleries";
-import { MAX_PROPERTY_MEDIA_BYTES, MAX_PROPERTY_PHOTOS, STAGING_STYLES } from "../shared/video";
+import { MAX_PROPERTY_PHOTOS, STAGING_STYLES } from "../shared/video";
 import { AUTH_UNAVAILABLE_ERR_MSG, COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
+  claimRenderLock,
   createVideoProject,
   decrementStagingCredits,
-  decrementVideoQuota,
+  ensureBillingAccount,
+  getClipCredits,
+  getUserByEmail,
   getVideoProject,
+  getVideoProjectByShareToken,
   incrementStagingCredits,
-  incrementVideoQuota,
   insertContactMessage,
+  listCreditLedger,
   listVideoProjects,
+  moveCredits,
+  releaseRenderLock,
   updateVideoProject,
 } from "./db";
 import { stagePhoto } from "./stagingPipeline";
-import { checkRateLimit } from "./rateLimit";
+import { checkRateLimit, type RateLimitName } from "./rateLimit";
 import {
   getApprovalTransition,
   getChangeRequestTransition,
@@ -26,7 +32,6 @@ import {
   validateUploadedPropertyMedia,
 } from "./projects";
 import { signStoredUrl, storageCreatePutTarget, storageGetSignedUrl } from "./storage";
-import { appendUploadChunk, createUploadSession, finalizeUploadSession } from "./uploadSessions";
 import { getProjectRenderStatus, getShotPlan } from "./renderPipeline";
 import { buildCinematicPrompt, refreshFalRender, refreshShotClassification, submitFalRender, submitShotClassification } from "./falPipeline";
 
@@ -43,6 +48,36 @@ function projectIdInput(id: number) {
   }
 }
 
+/**
+ * Kicks off per-photo vision classification for a freshly created project, but only for an
+ * account that could actually pay to render it.
+ *
+ * Classification is ten fal.ai vision calls. It used to run on every project creation with no
+ * quota and no limit, so an account with no credit -- and therefore no way to ever render --
+ * could still run up an unbounded vision bill just by creating projects in a loop.
+ */
+async function startClassificationIfFunded(
+  userId: number,
+  project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>,
+  accessToken: string | null,
+) {
+  const credits = await getClipCredits(userId);
+  if (credits < project.mediaUrls.length) {
+    console.info(`[Projects] skipping pre-approval classification for project ${project.id}: ${credits} credits for ${project.mediaUrls.length} photos.`);
+    return;
+  }
+  try {
+    await submitShotClassification(userId, project, accessToken);
+  } catch (error) {
+    console.error(`[Projects] pre-approval classification submission failed for project ${project.id}:`, error);
+  }
+}
+
+/** 32 bytes of randomness, hex-encoded: long enough that a share link cannot be guessed. */
+function newShareToken() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function isPilotMediaKey(key: string) {
   return key.startsWith("pilot:");
 }
@@ -50,6 +85,18 @@ function isPilotMediaKey(key: string) {
 function asOverrideArray<T>(value: (T | null)[] | null | undefined, length: number): (T | null)[] {
   const source = value || [];
   return Array.from({ length }, (_, index) => source[index] ?? null);
+}
+
+/**
+ * Enforces a named rate limit, or rejects. Spend-bearing limits fail closed (see
+ * server/rateLimit.ts), so an Upstash outage refuses the request rather than uncapping a
+ * fal.ai bill.
+ */
+async function requireRateLimit(name: RateLimitName, subject: string) {
+  const { allowed } = await checkRateLimit(name, subject);
+  if (!allowed) {
+    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many requests. Please wait a moment and try again." });
+  }
 }
 
 function clientIp(req: { headers: Record<string, string | string[] | undefined>; socket: { remoteAddress?: string } }) {
@@ -106,10 +153,7 @@ export const appRouter = router({
         }),
       )
       .mutation(async ({ ctx, input }) => {
-        const { allowed } = await checkRateLimit(`contact:${clientIp(ctx.req)}`);
-        if (!allowed) {
-          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many messages sent. Please try again later." });
-        }
+        await requireRateLimit("contact", clientIp(ctx.req));
         try {
           await insertContactMessage(input);
         } catch (error) {
@@ -140,6 +184,7 @@ export const appRouter = router({
         }),
       )
       .mutation(async ({ ctx, input }) => {
+        await requireRateLimit("projectCreate", String(ctx.user.id));
         try {
           validateUploadedPropertyMedia(input.files);
           if (input.files.some(file => !file.key.startsWith(`property-projects/${ctx.user.id}/`))) {
@@ -157,13 +202,7 @@ export const appRouter = router({
             status: "Review",
           });
           const created = await getVideoProject(ctx.user.id, id);
-          if (created) {
-            try {
-              await submitShotClassification(ctx.user.id, created, ctx.supabaseAccessToken);
-            } catch (error) {
-              console.error(`[Projects] pre-approval classification submission failed for project ${id}:`, error);
-            }
-          }
+          if (created) await startClassificationIfFunded(ctx.user.id, created, ctx.supabaseAccessToken);
           return { id };
         } catch (error) {
           console.error("[Projects] create failed:", error);
@@ -182,6 +221,7 @@ export const appRouter = router({
         location: z.string().trim().min(2).max(180),
       }))
       .mutation(async ({ ctx, input }) => {
+        await requireRateLimit("projectCreate", String(ctx.user.id));
         const gallery = getPilotGallery(input.gallery);
         const selected = input.imageIds.map(id => gallery.find(image => image.id === id));
         if (gallery.length === 0 || input.imageIds.length !== gallery.length || selected.some(image => !image) || new Set(input.imageIds).size !== input.imageIds.length) {
@@ -200,45 +240,70 @@ export const appRouter = router({
           status: "Review",
         });
         const created = await getVideoProject(ctx.user.id, id);
-        if (created) {
-          try {
-            await submitShotClassification(ctx.user.id, created, ctx.supabaseAccessToken);
-          } catch (error) {
-            console.error(`[Projects] pre-approval classification submission failed for project ${id}:`, error);
-          }
-        }
+        if (created) await startClassificationIfFunded(ctx.user.id, created, ctx.supabaseAccessToken);
         return { id };
       }),
     approve: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       projectIdInput(input.id);
+      await requireRateLimit("renderApprove", String(ctx.user.id));
       const project = await getVideoProject(ctx.user.id, input.id);
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+      if (project.status !== "Review") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "This project is already in production." });
+      }
+
+      // Take the render lock BEFORE reading credit or calling fal.ai. Reading the status above
+      // is not enough on its own: two approvals arriving together would both see "Review" and
+      // both buy a full set of clips. The lock is a conditional UPDATE, so exactly one wins.
+      if (!(await claimRenderLock(ctx.user.id, input.id))) {
+        throw new TRPCError({ code: "CONFLICT", message: "This project is already starting. Give it a moment." });
+      }
+
+      // Credits are per clip, and one photo becomes one clip.
+      const cost = project.mediaUrls.length;
+      let spent = false;
       try {
         const transition = getApprovalTransition(project.status);
-        const remaining = await decrementVideoQuota(ctx.user.id);
+        const remaining = await moveCredits({
+          userId: ctx.user.id,
+          delta: -cost,
+          kind: "spend",
+          reason: `Render ${cost} clip${cost === 1 ? "" : "s"} for project ${input.id}`,
+          projectId: input.id,
+        });
         if (remaining === null) {
-          throw new Error("You've used all of your included videos. Contact us to add more before rendering another reel.");
+          const available = await getClipCredits(ctx.user.id);
+          throw new Error(`This reel needs ${cost} clip credit${cost === 1 ? "" : "s"} and you have ${available}. Contact us to top up before rendering.`);
         }
-        try {
-          const render = await submitFalRender(ctx.user.id, project, ctx.supabaseAccessToken);
-          const updated = await updateVideoProject(ctx.user.id, input.id, transition);
-          if (!updated) throw new Error("The project could not be updated after rendering started.");
-          // mediaKeys don't change across approval -- sign them once and hand the same array to
-          // both presenters instead of paying for two full signing round-trips in series, which
-          // was enough to blow past the 10s function budget under any Storage-signing latency.
-          const sourceUrls = await presentSourceUrls(updated, ctx.supabaseAccessToken);
-          const [presentedProject, presentedRender] = await Promise.all([
-            presentProject(updated, ctx.supabaseAccessToken, sourceUrls),
-            presentRender(render, project, ctx.supabaseAccessToken, sourceUrls),
-          ]);
-          return { project: presentedProject, render: presentedRender };
-        } catch (renderError) {
-          await incrementVideoQuota(ctx.user.id).catch(() => {});
-          throw renderError;
-        }
+        spent = true;
+
+        const render = await submitFalRender(ctx.user.id, project, ctx.supabaseAccessToken);
+        const updated = await updateVideoProject(ctx.user.id, input.id, { ...transition, creditsSpent: cost });
+        if (!updated) throw new Error("The project could not be updated after rendering started.");
+        // mediaKeys don't change across approval -- sign them once and hand the same array to
+        // both presenters instead of paying for two full signing round-trips in series, which
+        // was enough to blow past the 10s function budget under any Storage-signing latency.
+        const sourceUrls = await presentSourceUrls(updated, ctx.supabaseAccessToken);
+        const [presentedProject, presentedRender] = await Promise.all([
+          presentProject(updated, ctx.supabaseAccessToken, sourceUrls),
+          presentRender(render, project, ctx.supabaseAccessToken, sourceUrls),
+        ]);
+        return { project: presentedProject, render: presentedRender };
       } catch (error) {
+        // Nothing was rendered, so give the credits back -- exactly what was taken.
+        if (spent) {
+          await moveCredits({
+            userId: ctx.user.id,
+            delta: cost,
+            kind: "refund",
+            reason: `Render never started for project ${input.id}`,
+            projectId: input.id,
+          }).catch(refundError => console.error(`[Projects] refund failed for project ${input.id}:`, refundError));
+        }
         console.error(`[Projects] approve failed for project ${input.id}:`, error);
-        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to start fal.ai rendering." });
+        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to start rendering." });
+      } finally {
+        await releaseRenderLock(ctx.user.id, input.id).catch(() => {});
       }
     }),
     reorder: protectedProcedure
@@ -274,6 +339,7 @@ export const appRouter = router({
       .input(z.object({ id: z.number().int().positive(), index: z.number().int().nonnegative(), style: z.enum(STAGING_STYLES) }))
       .mutation(async ({ ctx, input }) => {
         projectIdInput(input.id);
+        await requireRateLimit("stagePhoto", String(ctx.user.id));
         const project = await getVideoProject(ctx.user.id, input.id);
         if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
         try {
@@ -328,13 +394,46 @@ export const appRouter = router({
         if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
         if (project.status === "Processing" && (project.promptRequestIds?.length || project.falRequestIds?.length)) {
           try {
+            // Read-only: polls fal.ai and persists what has landed, but never buys the next
+            // batch. When a purchase is due the snapshot comes back with needsAdvance set and
+            // the client calls advanceRender, which holds the lock while it spends.
             return await presentRender(await refreshFalRender(ctx.user.id, project, ctx.supabaseAccessToken), project, ctx.supabaseAccessToken);
           } catch (error) {
             console.error(`[Projects] renderStatus refresh failed for project ${input.id}:`, error);
-            throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to refresh fal.ai rendering." });
+            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Unable to refresh this render right now." });
           }
         }
         return presentRender(getProjectRenderStatus(project), project, ctx.supabaseAccessToken);
+      }),
+    /**
+     * Buys the next batch of fal.ai clips for a project already in production.
+     *
+     * A mutation rather than part of the status query on purpose: this spends money, and a
+     * polled query can be retried by the client at will. The render lock makes a duplicate
+     * call a no-op instead of a second charge.
+     */
+    advanceRender: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        projectIdInput(input.id);
+        const project = await getVideoProject(ctx.user.id, input.id);
+        if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+        if (project.status !== "Processing") {
+          return presentRender(getProjectRenderStatus(project), project, ctx.supabaseAccessToken);
+        }
+        if (!(await claimRenderLock(ctx.user.id, input.id))) {
+          // Someone else is already submitting this batch. Report current state, do not buy.
+          return presentRender(getProjectRenderStatus(project), project, ctx.supabaseAccessToken);
+        }
+        try {
+          const snapshot = await refreshFalRender(ctx.user.id, project, ctx.supabaseAccessToken, { allowSubmission: true });
+          return await presentRender(snapshot, project, ctx.supabaseAccessToken);
+        } catch (error) {
+          console.error(`[Projects] advanceRender failed for project ${input.id}:`, error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Unable to continue this render right now." });
+        } finally {
+          await releaseRenderLock(ctx.user.id, input.id).catch(() => {});
+        }
       }),
     shotDirections: protectedProcedure
       .input(z.object({ id: z.number().int().positive() }))
@@ -412,41 +511,99 @@ export const appRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to complete this project." });
         }
       }),
+    /** Mints (or returns) this project's public share token. Owner only. */
+    share: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      projectIdInput(input.id);
+      const project = await getVideoProject(ctx.user.id, input.id);
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+      if (project.status !== "Done" || !project.finalVideoUrl) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "The reel has to finish before you can share it." });
+      }
+      const shareToken = project.shareToken || newShareToken();
+      if (!project.shareToken) await updateVideoProject(ctx.user.id, input.id, { shareToken });
+      return { shareToken };
+    }),
+    /** Revokes the public link. Anyone holding the old URL stops being able to open it. */
+    unshare: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      projectIdInput(input.id);
+      const project = await getVideoProject(ctx.user.id, input.id);
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+      await updateVideoProject(ctx.user.id, input.id, { shareToken: null });
+      return { success: true } as const;
+    }),
+    /**
+     * The signed-out share page.
+     *
+     * Deliberately returns only what a viewer needs to watch the reel -- title, location, and
+     * the finished video. No owner identity, no source photos, no render internals, no
+     * project id. The Share button used to copy the owner-scoped dashboard URL, which showed
+     * the recipient nothing but "Project not found".
+     */
+    getShared: publicProcedure.input(z.object({ token: z.string().min(16).max(64) })).query(async ({ ctx, input }) => {
+      await requireRateLimit("shareView", clientIp(ctx.req));
+      const project = await getVideoProjectByShareToken(input.token);
+      if (!project || project.status !== "Done" || !project.finalVideoUrl) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "This link is no longer available." });
+      }
+      return {
+        title: project.title,
+        location: project.location,
+        description: project.description,
+        // Signed with the service credentials: a share viewer has no Supabase session.
+        finalVideoUrl: await signStoredUrl(project.finalVideoUrl, null),
+      };
+    }),
+  }),
+  billing: router({
+    /** What this account can spend, and the history behind it. */
+    summary: protectedProcedure.query(async ({ ctx }) => {
+      const [clipCredits, account, ledger] = await Promise.all([
+        getClipCredits(ctx.user.id),
+        ensureBillingAccount(ctx.user.id),
+        listCreditLedger(ctx.user.id),
+      ]);
+      return {
+        clipCredits,
+        stagingCredits: ctx.user.stagingCreditsRemaining,
+        plan: account?.plan ?? "none",
+        status: account?.status ?? "inactive",
+        ledger,
+      };
+    }),
+  }),
+  admin: router({
+    /**
+     * Grants clip credits to an account by email.
+     *
+     * This is the billing seam until a payment gateway is wired up: the owner takes payment
+     * out of band and grants the matching credits here. `idempotencyKey` is what stops a
+     * double-submitted grant from handing out twice the credit.
+     */
+    grantCredits: adminProcedure
+      .input(z.object({
+        email: z.string().trim().email().max(320),
+        clipCredits: z.number().int().min(1).max(10_000),
+        reason: z.string().trim().min(3).max(500),
+        idempotencyKey: z.string().trim().min(8).max(160),
+      }))
+      .mutation(async ({ input }) => {
+        const target = await getUserByEmail(input.email);
+        if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "No account with that email address." });
+        const balance = await moveCredits({
+          userId: target.id,
+          delta: input.clipCredits,
+          kind: "grant",
+          reason: input.reason,
+          idempotencyKey: input.idempotencyKey,
+        });
+        return { userId: target.id, email: input.email, clipCredits: balance };
+      }),
   }),
   media: router({
-    createUploadSession: protectedProcedure
-      .input(z.object({ name: z.string().trim().min(1).max(240), type: z.string().min(1).max(100), totalBytes: z.number().int().positive().max(MAX_PROPERTY_MEDIA_BYTES) }))
-      .mutation(({ ctx, input }) => {
-        try {
-          return createUploadSession(ctx.user.id, input.name, input.type, input.totalBytes, ctx.supabaseAccessToken);
-        } catch (error) {
-          console.error("[Media] createUploadSession failed:", error);
-          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to prepare upload." });
-        }
-      }),
-    appendUploadChunk: protectedProcedure
-      .input(z.object({ uploadId: z.string().uuid(), chunk: z.string().min(4).max(100_000) }))
-      .mutation(({ ctx, input }) => {
-        try {
-          return appendUploadChunk(ctx.user.id, input.uploadId, input.chunk);
-        } catch (error) {
-          console.error("[Media] appendUploadChunk failed:", error);
-          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to upload this part." });
-        }
-      }),
-    finalizeUploadSession: protectedProcedure
-      .input(z.object({ uploadId: z.string().uuid() }))
-      .mutation(async ({ ctx, input }) => {
-        try {
-          return await finalizeUploadSession(ctx.user.id, input.uploadId);
-        } catch (error) {
-          console.error("[Media] finalizeUploadSession failed:", error);
-          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to secure this media." });
-        }
-      }),
     createUploadTarget: protectedProcedure
       .input(z.object({ name: z.string().trim().min(1).max(240), type: z.string().min(1).max(100) }))
       .mutation(async ({ ctx, input }) => {
+        await requireRateLimit("uploadTarget", String(ctx.user.id));
         const allowedTypes = ["image/jpeg", "image/png", "image/webp", "video/webm", "video/mp4"];
         if (!allowedTypes.includes(input.type)) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Use JPG, PNG, WEBP, WEBM, or MP4 media files." });

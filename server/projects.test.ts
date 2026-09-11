@@ -4,32 +4,38 @@ import {
   getChangeRequestTransition,
   getCompletionTransition,
   isProjectStatus,
-  validatePropertyMedia,
+  validateUploadedPropertyMedia,
 } from "./projects";
-import { appendUploadChunk, createUploadSession } from "./uploadSessions";
 
-const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-
-function imageFiles(count: number) {
-  return Array.from({ length: count }).map((_, i) => ({ name: `${i}.png`, type: "image/png", base64: pixel }));
+function uploaded(count: number, overrides: Partial<{ name: string; type: string; key: string; url: string }> = {}) {
+  return Array.from({ length: count }).map((_, i) => ({
+    name: `${i}.png`,
+    type: "image/png",
+    key: `property-projects/42/${i}.png`,
+    url: `/manus-storage/property-projects/42/${i}.png`,
+    ...overrides,
+  }));
 }
 
 describe("property media validation", () => {
-  it("accepts one through ten property images", () => {
-    expect(validatePropertyMedia(imageFiles(1))).toMatchObject({ isVideo: false });
-    expect(validatePropertyMedia(imageFiles(10))).toMatchObject({ isVideo: false });
+  it("accepts one through ten securely uploaded property images", () => {
+    expect(validateUploadedPropertyMedia(uploaded(1))).toMatchObject({ isVideo: false });
+    expect(validateUploadedPropertyMedia(uploaded(10))).toMatchObject({ isVideo: false });
   });
 
   it("rejects more than ten property images", () => {
-    expect(() => validatePropertyMedia(imageFiles(11))).toThrow("Upload up to 10 property photos.");
+    expect(() => validateUploadedPropertyMedia(uploaded(11))).toThrow("Upload up to 10 property photos.");
   });
 
   it("rejects video uploads", () => {
-    expect(() =>
-      validatePropertyMedia(
-        Array.from({ length: 2 }).map((_, i) => ({ name: `${i}.mp4`, type: "video/mp4", base64: pixel })),
-      ),
-    ).toThrow("Upload property images only");
+    expect(() => validateUploadedPropertyMedia(uploaded(2, { type: "video/mp4" }))).toThrow("Upload property images only");
+  });
+
+  it("rejects media that was not uploaded through our own storage", () => {
+    expect(() => validateUploadedPropertyMedia(uploaded(1, { url: "https://untrusted.example/photo.png" })))
+      .toThrow("uploaded securely");
+    expect(() => validateUploadedPropertyMedia(uploaded(1, { key: "somewhere-else/photo.png" })))
+      .toThrow("uploaded securely");
   });
 
   it("preserves the required project status vocabulary and review transition", () => {
@@ -48,11 +54,5 @@ describe("property media validation", () => {
       finalVideoUrl: "/manus-storage/final-film.mp4",
     });
     expect(() => getCompletionTransition("http://untrusted.example/film.mp4")).toThrow("secure media URL");
-  });
-
-  it("accepts bounded authenticated upload chunks and accounts for their bytes", () => {
-    const session = createUploadSession(42, "villa.jpg", "image/jpeg", 3);
-    expect(appendUploadChunk(42, session.id, "QUJD")).toEqual({ receivedBytes: 3, totalBytes: 3 });
-    expect(() => appendUploadChunk(41, session.id, "QQ==")).toThrow("expired");
   });
 });

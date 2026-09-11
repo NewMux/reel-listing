@@ -80,6 +80,10 @@ function compactDirection(value: string, maxLength: number) {
 // console.error's default inspection depth flattens a fal.ai ValidationError's nested
 // `body.detail` into an unhelpful "[Object]" -- surface the real validation reason instead so a
 // future failure like that is diagnosable from logs alone, not a guessing game.
+//
+// SERVER LOGS ONLY. A provider error body can carry our prompt text, signed source URLs, and
+// fal.ai account detail; `renderError` is returned to the browser, so the user-facing string
+// is always one of the fixed messages below instead.
 function describeFalError(error: unknown) {
   if (error && typeof error === "object" && "body" in error) {
     try {
@@ -373,7 +377,23 @@ export async function submitFalRender(userId: number, project: VideoProject, acc
   });
 }
 
-export async function refreshFalRender(userId: number, project: VideoProject, accessToken?: string | null): Promise<RenderStatusSnapshot> {
+/**
+ * Polls fal.ai for whatever this project already has in flight and persists what has landed.
+ *
+ * `allowSubmission` decides whether this call may also SUBMIT the next batch of jobs, which
+ * costs money. It is false on the read path (the status endpoint the browser polls every few
+ * seconds, which React Query is free to retry whenever it likes) and true only for the
+ * explicit advance mutation, which holds the project's render lock while it runs. Submitting
+ * straight from the polled query is what previously let two overlapping polls, or two open
+ * tabs, each buy a full set of clips for the same project.
+ */
+export async function refreshFalRender(
+  userId: number,
+  project: VideoProject,
+  accessToken?: string | null,
+  options: { allowSubmission?: boolean } = {},
+): Promise<RenderStatusSnapshot> {
+  const allowSubmission = options.allowSubmission ?? false;
   const promptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
   const generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
   const shotAnalysis = asShotAnalysisArray(project.shotAnalysis, project.mediaUrls.length);
@@ -391,13 +411,13 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
           const direction = parseDirection(result.data, index);
           shotAnalysis[index] = direction;
           generatedPrompts[index] = buildCinematicPrompt(index, direction, project);
-          if (!generatedPrompts[index]) failedMessage = `fal.ai could not create direction for photo ${index + 1}.`;
+          if (!generatedPrompts[index]) failedMessage = `We could not create the shot direction for photo ${index + 1}. Please try again.`;
         } else if (state === "FAILED") {
-          failedMessage = `fal.ai could not create direction for photo ${index + 1}.`;
+          failedMessage = `We could not create the shot direction for photo ${index + 1}. Please try again.`;
         }
       } catch (error) {
         console.error(`[FalPipeline] vision prompt poll failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
-        failedMessage = describeFalError(error) || `fal.ai could not create direction for photo ${index + 1}.`;
+        failedMessage = `We could not create the shot direction for photo ${index + 1}. Please try again.`;
       }
     }));
 
@@ -418,6 +438,11 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
   const clipUrls = asStringArray(project.clipUrls, project.mediaUrls.length);
 
   if (!allReady(requestIds, project.mediaUrls.length)) {
+    // Read path: report that submission is due and let the caller ask for it explicitly.
+    // Never buy clips from inside a query.
+    if (!allowSubmission) {
+      return { ...getProjectRenderStatus({ ...project, promptRequestIds, generatedPrompts: prompts }), needsAdvance: true };
+    }
     const signedImages = project.mediaKeys.length === project.mediaUrls.length
       ? await getFalSourceUrls(project, accessToken)
       : [];
@@ -443,13 +468,13 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
       if (state === "COMPLETED") {
         const result = await client.queue.result(FAL_IMAGE_TO_VIDEO_MODEL, { requestId });
         clipUrls[index] = normalizeClipUrl(result.data);
-        if (!clipUrls[index]) failedMessage = `fal.ai returned no video for photo ${index + 1}.`;
+        if (!clipUrls[index]) failedMessage = `We did not get a usable clip for photo ${index + 1}. Please try again.`;
       } else if (state === "FAILED") {
-        failedMessage = `fal.ai could not render photo ${index + 1}.`;
+        failedMessage = `We could not render photo ${index + 1}. Please try again.`;
       }
     } catch (error) {
       console.error(`[FalPipeline] video render poll failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
-      failedMessage = describeFalError(error) || `fal.ai could not render photo ${index + 1}.`;
+      failedMessage = `We could not render photo ${index + 1}. Please try again.`;
     }
   }));
 
