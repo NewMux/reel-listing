@@ -50,9 +50,14 @@ Priced against $0.56 per credit:
 A "full reel" is ten photos at ten seconds each. A customer choosing the shorter social style
 gets twice as many reels from the same credits, and costs correspondingly less to serve.
 
-These figures are before payment-processing fees and before the fixed infrastructure below.
-No payment gateway is wired up yet, so credits are granted by an admin after payment is taken
-out of band (`admin.grantCredits`).
+These figures are before Paddle's fees and before the fixed infrastructure below. Paddle is
+the merchant of record, so its cut covers payment processing and the worldwide VAT and
+sales-tax handling a Bahrain-registered company would otherwise carry itself. Check the rate
+on your own Paddle agreement and subtract it from the margins above.
+
+Unused credit rolls over for two months' allowance, so the liability an active subscriber can
+accumulate is capped at 120, 320 or 800 credits by plan -- at $0.56 a credit, at most $67,
+$179 or $448 of fal.ai spend outstanding per account.
 
 Plan names match the `billing_plan` database enum deliberately, so a granted plan and a
 displayed plan are the same word.
@@ -68,6 +73,9 @@ GCC customers see the same plans priced in Bahraini dinar at the fixed peg of
 | Pro | 94 | $249.95 | 160 | $89.60 | 64% |
 | Agency | 225 | $598.28 | 400 | $224.00 | 63% |
 | Extra credits | 0.750 | $1.99 | 1 | $0.56 | 72% |
+
+Paddle cannot charge in dinar, so these are an approximation at the peg shown beside the USD
+price, not a separate price list. Customers are charged in USD.
 
 Source for the peg: https://www.cbb.gov.bh/facilities-interest-rates/
 

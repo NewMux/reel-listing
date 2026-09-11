@@ -45,6 +45,11 @@ Set on the Vercel project, for Production and Preview both.
 | `PUBLIC_URL` | Yes | Stable public origin, e.g. `https://reel-listing.com`. fal.ai webhook callbacks are built from this, so it must not be a per-deployment URL. |
 | `UPSTASH_REDIS_REST_URL` | Yes | Rate limiting. |
 | `UPSTASH_REDIS_REST_TOKEN` | Yes | Rate limiting. |
+| `PADDLE_WEBHOOK_SECRET` | Yes, to take payment | Notification-setting secret from Paddle. The webhook refuses every request without it, by design. |
+| `PADDLE_PRICE_SOLO` / `_PRO` / `_AGENCY` | Yes, to take payment | Paddle price ids, server side. These map an incoming purchase back to a plan. |
+| `VITE_PADDLE_CLIENT_TOKEN` | Yes, to take payment | Client-side token. Public by design; it can only open a checkout. |
+| `VITE_PADDLE_PRICE_SOLO` / `_PRO` / `_AGENCY` | Yes, to take payment | The same price ids, for the checkout button. Must match the server ones. |
+| `VITE_PADDLE_ENV` | Sandbox only | Set to `sandbox` while testing. Omit in production. |
 | `OWNER_OPEN_ID` | Recommended | The account promoted to `admin`, which is what `admin.grantCredits` requires. Set it before first sign-in; the role is assigned at upsert. |
 | `OAUTH_SERVER_URL`, `VITE_OAUTH_PORTAL_URL`, `VITE_APP_ID` | No | Manus OAuth. Leave unset when using Supabase Auth. |
 | `BUILT_IN_FORGE_API_URL`, `BUILT_IN_FORGE_API_KEY` | No | Legacy Forge storage. Leave unset; Supabase Storage is the path in use. |
@@ -144,9 +149,63 @@ before applying, and verify with a second test account.
 
 ---
 
-## Granting credits
+## Payments, through Paddle
 
-No payment gateway is wired up. Take payment out of band, then grant:
+Paddle is the **merchant of record**: it sells to the customer, then pays you. That means it
+calculates, collects and remits VAT and sales tax everywhere, which a Bahrain-registered
+company selling into the EU, UK and US would otherwise have to handle itself. It is also why
+this is not Stripe, which does not support Bahrain-registered businesses.
+
+### Setting it up
+
+1. In Paddle, create three **products with monthly prices** in USD: $99, $249, $599. Copy
+   each price id into both the server and `VITE_` environment variables above. They must
+   match, or a purchase will be taken and then not credited.
+2. Add a **notification destination** pointing at `https://reel-listing.com/api/webhooks/paddle`,
+   subscribed to `transaction.completed`, `subscription.created`, `subscription.updated` and
+   `subscription.canceled`. Copy its secret into `PADDLE_WEBHOOK_SECRET`.
+3. Test in sandbox first with `VITE_PADDLE_ENV=sandbox` and sandbox credentials.
+
+### What the webhook does
+
+`transaction.completed` is the only event that grants credit, because it is the only one that
+means money moved. The grant is keyed on Paddle's transaction id, so Paddle's retries and any
+replay are no-ops against the UNIQUE `credit_ledger.referenceId` index.
+
+The subscription events only record state: plan, status, period end, and the Paddle customer
+and subscription ids. A cancellation deliberately leaves the balance alone — those credits
+were paid for.
+
+Unused credit rolls over for **two months' allowance** (120 / 320 / 800). A renewal that
+would exceed the cap writes an `expiry` ledger row for the excess, so the balance still
+equals the sum of its ledger.
+
+### Currency
+
+Paddle cannot charge in Bahraini dinar — BHD is not a supported currency. Plans are charged
+in USD and the pricing page shows a dinar figure only as a clearly-labelled approximation at
+the pegged rate. Do not quote a BHD price as if it were the amount charged; the Paddle
+checkout will show dollars.
+
+### Verifying the integration
+
+Signature verification is the control standing between a forged request and free credit, so
+check it works rather than assuming:
+
+1. Send a simulated `transaction.completed` from Paddle. Expect one `purchase`-style row and
+   the right balance.
+2. Replay the identical event. Expect no change.
+3. Alter one character of the payload. Expect a 403.
+
+If every request is rejected with `bad-signature`, the cause is almost always a body that was
+parsed and re-serialised before hashing. `server/_core/api.ts` captures the raw bytes in the
+`express.json` verify callback specifically to avoid this; anything that re-reads the body
+before `registerPaddleWebhook` will break it again.
+
+## Granting credits by hand
+
+Still available, and still the right tool for refunds, goodwill, enterprise deals, and any
+period where Paddle is unreachable.
 
 ```
 admin.grantCredits({

@@ -1,7 +1,7 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { and, desc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
-import { billingAccounts, contactMessages, creditLedger, CreditEntryType, InsertContactMessage, InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
+import { billingAccounts, BillingPlan, contactMessages, creditLedger, CreditEntryType, InsertContactMessage, InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -136,6 +136,64 @@ export async function moveCredits(movement: CreditMovement): Promise<number | nu
     });
     return balanceAfter;
   });
+}
+
+/**
+ * Grants a subscription's monthly allowance, then expires anything above the plan's rollover
+ * cap in the same breath.
+ *
+ * Both movements are ledger entries, so the balance still equals the sum of its history and
+ * the reconciliation query in DEPLOYMENT.md keeps returning zero rows. The expiry is derived
+ * from the balance the grant actually produced rather than one read beforehand, so a renewal
+ * racing with a reservation cannot expire credit the customer just committed to a render.
+ */
+export async function grantSubscriptionCredits(input: {
+  userId: number;
+  credits: number;
+  capCredits: number;
+  referenceId: string;
+  description: string;
+}): Promise<number | null> {
+  const granted = await moveCredits({
+    userId: input.userId,
+    amount: input.credits,
+    entryType: "subscription",
+    referenceId: input.referenceId,
+    description: input.description,
+  });
+  if (granted === null || granted <= input.capCredits) return granted;
+
+  const excess = granted - input.capCredits;
+  const capped = await moveCredits({
+    userId: input.userId,
+    amount: -excess,
+    entryType: "expiry",
+    referenceId: `${input.referenceId}:cap`,
+    description: `Rollover cap: expired ${excess} credit${excess === 1 ? "" : "s"} above ${input.capCredits}`,
+  });
+  return capped ?? granted;
+}
+
+/** Finds the account a Paddle subscription belongs to, for renewal and cancellation events. */
+export async function getBillingAccountBySubscriptionId(externalSubscriptionId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(billingAccounts).where(eq(billingAccounts.externalSubscriptionId, externalSubscriptionId)).limit(1);
+  return result[0];
+}
+
+/** Records what Paddle knows about a subscription: plan, status, period end, and its ids. */
+export async function updateBillingAccount(userId: number, updates: Partial<{
+  plan: BillingPlan;
+  status: string;
+  externalCustomerId: string | null;
+  externalSubscriptionId: string | null;
+  currentPeriodEnd: Date | null;
+}>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Account storage is temporarily unavailable.");
+  await ensureBillingAccount(userId);
+  await db.update(billingAccounts).set({ ...updates, updatedAt: new Date() }).where(eq(billingAccounts.userId, userId));
 }
 
 /** Current clip-credit balance, or 0 when the account cannot be read. */

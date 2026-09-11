@@ -15,4 +15,16 @@ export const ENV = {
   publicUrl: process.env.PUBLIC_URL ?? "https://reel-listing.com",
   upstashRedisUrl: process.env.UPSTASH_REDIS_REST_URL ?? "",
   upstashRedisToken: process.env.UPSTASH_REDIS_REST_TOKEN ?? "",
+  /**
+   * Secret for the Paddle webhook endpoint, used to verify every incoming signature. This
+   * webhook is the only evidence the app ever gets that money changed hands, so without this
+   * the endpoint refuses everything rather than trusting an unverified body.
+   */
+  paddleWebhookSecret: process.env.PADDLE_WEBHOOK_SECRET ?? "",
+  /** Maps a Paddle price to one of our plans. Sandbox and production use different ids. */
+  paddlePriceIds: {
+    solo: process.env.PADDLE_PRICE_SOLO ?? "",
+    pro: process.env.PADDLE_PRICE_PRO ?? "",
+    agency: process.env.PADDLE_PRICE_AGENCY ?? "",
+  },
 };

@@ -114,7 +114,11 @@ export const billingAccounts = pgTable("billing_accounts", {
   currentPeriodEnd: timestamp("currentPeriodEnd", { withTimezone: true }),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
-}, table => [uniqueIndex("billing_accounts_user_idx").on(table.userId)]);
+}, table => [
+  uniqueIndex("billing_accounts_user_idx").on(table.userId),
+  // Every Paddle renewal webhook looks the account up by this.
+  uniqueIndex("billing_accounts_subscription_idx").on(table.externalSubscriptionId),
+]);
 
 /**
  * Every movement of credit, in order.
@@ -150,5 +154,6 @@ export type ContactMessage = typeof contactMessages.$inferSelect;
 export type InsertContactMessage = typeof contactMessages.$inferInsert;
 export type BillingAccount = typeof billingAccounts.$inferSelect;
 export type CreditEntryType = (typeof creditEntryType.enumValues)[number];
+export type BillingPlan = (typeof billingPlan.enumValues)[number];
 export type CreditLedgerEntry = typeof creditLedger.$inferSelect;
 export type InsertCreditLedgerEntry = typeof creditLedger.$inferInsert;

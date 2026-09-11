@@ -39,7 +39,8 @@
 - [x] Prevent unapproved extra render costs: zero credits by default, credit check before any fal.ai call, render lock against duplicate submission, rate limits on every spend-bearing endpoint.
 - [x] Add usage tracking: every grant, spend and refund is a credit_ledger row with a reason and a running balance.
 - [x] Retire the 35 BHD five-listing package. At $18.61 a reel it undercut the cheapest plan by 44% and left only two-thirds of a re-render per listing before the package stopped making money. 35 BHD is now the local-currency price of Solo (3 reels, 60 credits), which is the same 64% margin as every other plan.
-- [ ] Choose a payment gateway. Stripe does not support Bahrain-registered businesses; Tap Payments and MyFatoorah do. Credits are granted by an admin until then.
+- [x] Choose and integrate a payment gateway: Paddle, as merchant of record, so it handles VAT and sales tax worldwide rather than a Bahrain-registered company registering in each jurisdiction. Overlay checkout, signature-verified webhook, credits granted on transaction.completed.
+- [ ] Create the three Paddle products and the webhook destination, then run the sandbox verification in DEPLOYMENT.md. Payments stay off until those environment variables are set.
 - [ ] Add monitoring and a fal.ai spend alert. See PRODUCTION-CHECKLIST.md.
 - [ ] Run a database restore drill. See DEPLOYMENT.md.
 - [ ] Review the uploaded AI property video platform business plan and align its assumptions with VistaFlow’s product, pricing, and implementation roadmap.
