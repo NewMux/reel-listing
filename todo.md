@@ -35,9 +35,12 @@
 - [ ] Generate one 10-second image-to-video clip per uploaded property photo with a controlled shot prompt.
 - [ ] Assemble the 10 ordered clips into one approximately 100-second final listing video with branded transitions, music, and a call to action.
 - [ ] Track per-clip generation state, retries, render cost, and final composition progress in the dashboard.
-- [ ] Define the five completed-listing entitlement for the 35 BHD package, including a clear billing period and renewal rule.
-- [ ] Enforce one 10-photo, 10-clip production workflow per paid listing and prevent unapproved extra render costs.
-- [ ] Add usage tracking for included listings, retries, and paid rerender allowances.
-- [ ] Model direct production cost, payment fees, and gross profit for the 35 BHD five-listing package.
+- [x] Replace the per-listing entitlement with per-clip credits, so billing granularity matches cost granularity. See package-economics-research.md.
+- [x] Prevent unapproved extra render costs: zero credits by default, credit check before any fal.ai call, render lock against duplicate submission, rate limits on every spend-bearing endpoint.
+- [x] Add usage tracking: every grant, spend and refund is a credit_ledger row with a reason and a running balance.
+- [x] Model direct production cost and gross profit. The 35 BHD five-listing package is a 39% gross margin against 62-66% on the current plans; it should be repriced or retired.
+- [ ] Choose a payment gateway. Stripe does not support Bahrain-registered businesses; Tap Payments and MyFatoorah do. Credits are granted by an admin until then.
+- [ ] Add monitoring and a fal.ai spend alert. See PRODUCTION-CHECKLIST.md.
+- [ ] Run a database restore drill. See DEPLOYMENT.md.
 - [ ] Review the uploaded AI property video platform business plan and align its assumptions with VistaFlow’s product, pricing, and implementation roadmap.
 - [x] Commit and push the completed VistaFlow project and business-plan analysis to NewMux/reel-listing.
