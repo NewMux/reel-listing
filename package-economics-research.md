@@ -57,15 +57,38 @@ out of band (`admin.grantCredits`).
 Plan names match the `billing_plan` database enum deliberately, so a granted plan and a
 displayed plan are the same word.
 
-## Why the 35 BHD package does not work as written
+## Local-currency pricing
 
-`todo.md` proposed 35 BHD for five completed listings. At the fixed BHD peg of
-1 BHD = 2.659 USD that is $93.07 of revenue against five ten-photo reels, or
-$56.10 of direct cost. That is a **40% gross margin** before any payment fee or
-infrastructure, against 63-66% on the plans above. It should be repriced or
-retired.
+GCC customers see the same plans priced in Bahraini dinar at the fixed peg of
+1 BHD = 2.659 USD. Same credits, same product, same margin band:
+
+| Plan | BHD | USD equivalent | Credits | Direct cost | Gross margin |
+|---|---|---|---|---|---|
+| Solo | 35 | $93.07 | 60 | $33.60 | 64% |
+| Pro | 94 | $249.95 | 160 | $89.60 | 64% |
+| Agency | 225 | $598.28 | 400 | $224.00 | 63% |
+| Extra credits | 0.750 | $1.99 | 1 | $0.56 | 72% |
 
 Source for the peg: https://www.cbb.gov.bh/facilities-interest-rates/
+
+## The retired 35 BHD five-listing package
+
+`todo.md` originally proposed 35 BHD for five completed listings. That is $93.07 against
+$56.10 of direct cost: a **40% gross margin**, versus 63-66% everywhere else. The margin was
+not the main problem. Two other things were:
+
+**It undercut the cheapest plan by 44%.** At five listings it worked out to $18.61 a reel
+against $31.02 on Solo, so any customer who could see both would take it, making the worst
+margin in the range the most popular product.
+
+**It left no room for a re-render.** A reel a customer rejects costs a full $11.22 again with
+no new revenue. The package carried $36.97 of gross profit, or 3.3 re-renders across five
+listings -- about two-thirds of one per listing. Solo absorbs nearly two per listing. Estate
+agents are particular about how a listing looks, so this is a cost that will be incurred, not
+a hypothetical.
+
+The price point is kept, because 35 BHD is what the local market was quoted. It now buys the
+Solo plan: three full reels at 60 credits, on the same economics as every other plan.
 
 ## Fixed monthly costs
 
