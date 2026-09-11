@@ -3,6 +3,7 @@ import { ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { copy, useLocale } from "@/lib/locale";
+import { trpc } from "@/lib/trpc";
 
 export function Brand() {
   return <Link href="/" className="flex items-center"><img src="/logo.png" alt="Reel Listing" className="h-8 w-auto" /></Link>;
@@ -35,7 +36,26 @@ export function AppSidebar({ children }: { children: ReactNode }) {
   if (loading) return <div className="grid min-h-screen place-items-center bg-[#F7F2EF]"><div className="h-9 w-9 animate-spin rounded-full border-2 border-[#251811]/15 border-t-[#251811]" /></div>;
   if (!user && error) return <div className="grid min-h-screen place-items-center bg-[#F7F2EF] p-5"><div className="w-full max-w-md rounded-[28px] border border-[#251811]/10 bg-white p-8 text-center shadow-[0_24px_60px_rgba(17,37,30,.11)]"><div className="mx-auto mb-6 w-fit"><Brand /></div><h1 className="serif text-3xl text-[#251811]">{t.common.errorTitle}</h1><p className="mt-3 text-sm leading-6 text-[#766D68]">{t.common.errorBody}</p><p className="mt-4 rounded-xl bg-[#FFEFE5] px-4 py-3 text-xs leading-5 text-[#94522C]">{error.message}</p><button onClick={() => void refresh()} className="mt-7 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white">{t.common.retry}</button></div></div>;
   if (!user) return <div className="grid min-h-screen place-items-center bg-[#F7F2EF] p-5"><div className="w-full max-w-md rounded-[28px] border border-[#251811]/10 bg-white p-8 text-center shadow-[0_24px_60px_rgba(17,37,30,.11)]"><div className="mx-auto mb-6 w-fit"><Brand /></div><h1 className="serif text-3xl text-[#251811]">{t.common.signInTitle}</h1><p className="mt-3 text-sm leading-6 text-[#766D68]">{t.common.signInBody}</p><button onClick={() => setLocation("/auth")} className="mt-7 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white">{t.common.continue}<ArrowUpRight size={16}/></button></div></div>;
-  return <div className="min-h-screen bg-[#F7F2EF] lg:grid lg:grid-cols-[248px_1fr]"><aside className="hidden border-e border-[#251811]/10 bg-[#F0E8E3] lg:flex lg:min-h-screen lg:flex-col lg:p-5"><Brand /><nav className="mt-12 space-y-1"><button onClick={() => setLocation("/dashboard")} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold ${location === "/dashboard" ? "bg-[#251811] text-white" : "text-[#635953] hover:bg-white/70"}`}><LayoutDashboard size={17}/>{t.nav.dashboard}</button><button onClick={() => setLocation("/projects/new")} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold ${location === "/projects/new" ? "bg-[#251811] text-white" : "text-[#635953] hover:bg-white/70"}`}><Plus size={17}/>{t.dashboard.newProject}</button></nav><div className="mt-auto rounded-2xl border border-[#251811]/8 bg-white/60 p-3"><p className="truncate text-sm font-semibold text-[#34241B]">{user.name || t.common.memberFallback}</p><p className="mt-1 truncate text-xs text-[#7D736D]">{user.email}</p><div className="mt-3 flex items-center justify-between"><LocaleButton compact/><button onClick={logout} className="grid h-9 w-9 place-items-center rounded-full text-[#7D736D] hover:bg-white hover:text-[#251811]" aria-label={t.common.signOut}><LogOut size={16}/></button></div></div></aside><div className="min-w-0"><header className="sticky top-0 z-20 flex items-center justify-between border-b border-[#251811]/8 bg-[#F7F2EF]/88 px-5 py-4 backdrop-blur-md lg:hidden"><Brand/><div className="flex items-center gap-2"><LocaleButton compact/><button onClick={logout} className="grid h-9 w-9 place-items-center rounded-full border border-[#251811]/10" aria-label={t.common.signOut}><LogOut size={16}/></button></div></header>{children}</div></div>;
+  return <div className="min-h-screen bg-[#F7F2EF] lg:grid lg:grid-cols-[248px_1fr]"><aside className="hidden border-e border-[#251811]/10 bg-[#F0E8E3] lg:flex lg:min-h-screen lg:flex-col lg:p-5"><Brand /><nav className="mt-12 space-y-1"><button onClick={() => setLocation("/dashboard")} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold ${location === "/dashboard" ? "bg-[#251811] text-white" : "text-[#635953] hover:bg-white/70"}`}><LayoutDashboard size={17}/>{t.nav.dashboard}</button><button onClick={() => setLocation("/projects/new")} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold ${location === "/projects/new" ? "bg-[#251811] text-white" : "text-[#635953] hover:bg-white/70"}`}><Plus size={17}/>{t.dashboard.newProject}</button></nav><div className="mt-auto rounded-2xl border border-[#251811]/8 bg-white/60 p-3"><CreditBadge /><p className="truncate text-sm font-semibold text-[#34241B]">{user.name || t.common.memberFallback}</p><p className="mt-1 truncate text-xs text-[#7D736D]">{user.email}</p><div className="mt-3 flex items-center justify-between"><LocaleButton compact/><button onClick={logout} className="grid h-9 w-9 place-items-center rounded-full text-[#7D736D] hover:bg-white hover:text-[#251811]" aria-label={t.common.signOut}><LogOut size={16}/></button></div></div></aside><div className="min-w-0"><header className="sticky top-0 z-20 flex items-center justify-between border-b border-[#251811]/8 bg-[#F7F2EF]/88 px-5 py-4 backdrop-blur-md lg:hidden"><Brand/><div className="flex items-center gap-2"><LocaleButton compact/><button onClick={logout} className="grid h-9 w-9 place-items-center rounded-full border border-[#251811]/10" aria-label={t.common.signOut}><LogOut size={16}/></button></div></header>{children}</div></div>;
+}
+
+/**
+ * The account's clip-credit balance. Accounts start at zero, so this has to be visible
+ * before someone spends time uploading photos for a reel they cannot yet render.
+ */
+export function CreditBadge() {
+  const { locale } = useLocale();
+  const t = copy[locale];
+  const billing = trpc.billing.summary.useQuery(undefined, { retry: false, staleTime: 30_000 });
+  if (billing.data === undefined) return null;
+  const credits = billing.data.clipCredits;
+  return <div className={`mb-3 rounded-xl px-3 py-2 ${credits > 0 ? "bg-[#F3EDE9]" : "bg-[#FFEFE5]"}`}>
+    <p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#7D736D]">{t.billing.creditsLabel}</p>
+    <p className={`mt-0.5 text-sm font-bold ${credits > 0 ? "text-[#34241B]" : "text-[#94522C]"}`}>
+      {credits} {t.billing.creditsUnit}
+    </p>
+    {credits === 0 && <p className="mt-1 text-[11px] leading-4 text-[#94522C]">{t.billing.emptyHint}</p>}
+  </div>;
 }
 
 export function StatusPill({ status }: { status: string }) {

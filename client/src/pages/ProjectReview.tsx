@@ -21,6 +21,7 @@ export default function ProjectReview() {
     { enabled: Number.isSafeInteger(id), refetchInterval: query => query.state.data?.ready === false ? 2_000 : false },
   );
   const utils = trpc.useUtils();
+  const billing = trpc.billing.summary.useQuery(undefined, { retry: false, staleTime: 30_000 });
   const approve = trpc.projects.approve.useMutation({
     onSuccess: () => {
       utils.projects.get.invalidate({ id });
@@ -66,6 +67,11 @@ export default function ProjectReview() {
   if (project.isLoading) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.loading}</div></AppSidebar>;
   if (!project.data) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.projectNotFound}</div></AppSidebar>;
   const data = project.data;
+  // One photo becomes one clip, and one clip costs one credit.
+  const needed = data.mediaUrls.length;
+  const available = billing.data?.clipCredits ?? 0;
+  // Do not block on a balance we have not loaded yet; the server enforces it regardless.
+  const affordable = billing.data === undefined || available >= needed;
   const shots = shotDirections.data?.shots;
   const clipCount = data.mediaUrls.length;
   const durations = data.mediaUrls.map((_, index) => shotDirections.data?.clipDurations?.[index] || FAL_CLIP_SECONDS);
@@ -166,7 +172,13 @@ export default function ProjectReview() {
 
             {data.status === "Review" ? <>
               {approveError && <p className="mt-5 flex gap-2 rounded-xl bg-[#FFEFE5] px-3 py-2.5 text-xs font-medium leading-5 text-[#94522C]"><AlertCircle size={15} className="shrink-0" />{approveError}</p>}
-              <button disabled={approve.isPending} onClick={() => { setApproveError(""); approve.mutate({ id }); }} className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white transition hover:bg-[#402E24] disabled:opacity-70">{approve.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{approve.isPending ? t.review.preparing : t.review.approve}</button>
+              {needed > 0 && (
+                affordable
+                  // Say what approving costs before it is clicked, not after.
+                  ? <p className="mt-5 rounded-xl bg-[#F3EDE9] px-3 py-2.5 text-xs font-semibold leading-5 text-[#6A4A38]">{t.billing.costNote.replace("{needed}", String(needed))}</p>
+                  : <p className="mt-5 rounded-xl bg-[#FFEFE5] px-3 py-2.5 text-xs font-semibold leading-5 text-[#94522C]">{t.billing.needCredits.replace("{needed}", String(needed)).replace("{have}", String(available))}</p>
+              )}
+              <button disabled={approve.isPending || !affordable} onClick={() => { setApproveError(""); approve.mutate({ id }); }} className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white transition hover:bg-[#402E24] disabled:cursor-not-allowed disabled:opacity-60">{approve.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{approve.isPending ? t.review.preparing : t.review.approve}</button>
               <button onClick={() => setShowNotes(!showNotes)} className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#251811]/12 text-sm font-bold text-[#503F35] transition hover:bg-[#F6F2EF]"><MessageSquareText size={16} />{t.review.request}</button>
               {showNotes && <div className="mt-4 rounded-xl border border-[#251811]/10 bg-[#F8F4F1] p-3"><textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder={t.review.notePlace} rows={3} className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-[#A49E9A]" /><button disabled={notes.trim().length < 3 || request.isPending} onClick={() => request.mutate({ id, notes })} className="mt-3 h-9 w-full rounded-lg bg-[#E9C6B2] text-xs font-bold text-[#512E1A] disabled:opacity-50">{request.isPending ? t.common.loading : t.review.send}</button></div>}
             </> : <button onClick={() => setLocation(`/projects/${id}`)} className="mt-6 flex h-12 w-full items-center justify-center rounded-xl bg-[#251811] text-sm font-bold text-white">{t.review.viewProduction}</button>}
