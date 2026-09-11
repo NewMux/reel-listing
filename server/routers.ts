@@ -119,10 +119,22 @@ async function presentProject(project: NonNullable<Awaited<ReturnType<typeof get
 async function presentRender(snapshot: Awaited<ReturnType<typeof getProjectRenderStatus>>, project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null, sourceUrls?: string[]) {
   if (!project) return snapshot;
   const resolvedSourceUrls = sourceUrls ?? await presentSourceUrls(project, accessToken);
+  // Clips that have been copied into our own storage are stored as /manus-storage keys and
+  // have to be signed before the browser can fetch them for assembly. Clips still living on
+  // fal.ai are already fetchable and pass through untouched.
+  const [finalVideoUrl, clipUrls] = await Promise.all([
+    signStoredUrl(snapshot.finalVideoUrl, accessToken),
+    Promise.all(snapshot.clipUrls.map(url => signStoredUrl(url, accessToken))),
+  ]);
   return {
     ...snapshot,
-    finalVideoUrl: await signStoredUrl(snapshot.finalVideoUrl, accessToken),
-    shots: snapshot.shots.map((shot, index) => ({ ...shot, sourceUrl: resolvedSourceUrls[index] || shot.sourceUrl })),
+    finalVideoUrl,
+    clipUrls,
+    shots: snapshot.shots.map((shot, index) => ({
+      ...shot,
+      sourceUrl: resolvedSourceUrls[index] || shot.sourceUrl,
+      clipUrl: clipUrls[index] ?? shot.clipUrl,
+    })),
   };
 }
 
@@ -505,7 +517,11 @@ export const appRouter = router({
           if (project.status !== "Processing" || !project.clipUrls?.length || project.clipUrls.some(url => !url)) {
             throw new Error("All cinematic clips must be ready before final delivery.");
           }
-          return updateVideoProject(ctx.user.id, input.id, { ...getCompletionTransition(input.finalVideoUrl), renderProgress: 100, renderPhase: "complete", renderError: null });
+          const updated = await updateVideoProject(ctx.user.id, input.id, { ...getCompletionTransition(input.finalVideoUrl), renderProgress: 100, renderPhase: "complete", renderError: null });
+          if (!updated) throw new Error("The project could not be completed.");
+          // Signed, not the raw /manus-storage key: there is no storage proxy to resolve
+          // that path, so handing the browser the key would leave the player blank.
+          return presentProject(updated, ctx.supabaseAccessToken);
         } catch (error) {
           console.error(`[Projects] complete failed for project ${input.id}:`, error);
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to complete this project." });

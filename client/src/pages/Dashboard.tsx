@@ -4,7 +4,9 @@ import { AppSidebar, StatusPill } from "@/components/AppChrome";
 import { copy, useLocale } from "@/lib/locale";
 import { trpc } from "@/lib/trpc";
 
-const PROJECT_IMAGE = "/manus-storage/vistaflow-project-villa_cdc98c35.jpg";
+// Local asset. This used to point at a /manus-storage key, which needed a storage proxy
+// that no longer exists, so every project without a readable first photo showed a broken image.
+const PROJECT_IMAGE = "/hero.jpg";
 
 export default function Dashboard() {
   const { locale } = useLocale(); const t = copy[locale]; const [, setLocation] = useLocation(); const projects = trpc.projects.list.useQuery();

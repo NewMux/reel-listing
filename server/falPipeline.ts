@@ -10,7 +10,7 @@ import {
 } from "../shared/video";
 import { ENV } from "./_core/env";
 import { getProjectRenderStatus, type RenderStatusSnapshot } from "./renderPipeline";
-import { storageGetSignedUrl } from "./storage";
+import { storageGetSignedUrl, storagePut } from "./storage";
 import { updateVideoProject } from "./db";
 
 // Clip length is now per-photo (project.clipDurations), so any prompt text that names the
@@ -232,6 +232,56 @@ function parseDirection(value: unknown, index: number): ShotAnalysis {
   } catch {
     return { ...fallback, cameraMove: cleanDirection(cleaned, fallback.cameraMove) };
   }
+}
+
+/**
+ * How many freshly finished clips to copy into our own storage per invocation.
+ *
+ * fal.ai output URLs are not permanent, and the finished reel is stitched in the customer's
+ * browser -- so a customer who closes the tab and comes back later used to find clips that
+ * had expired and roughly $11 of rendering with nothing to show for it. Copying them in
+ * makes assembly resumable at any point.
+ *
+ * Two at a time: a 10s clip is several megabytes, and this runs inside the same 10s function
+ * budget as the status poll. Across the many polls a render takes, every clip gets copied.
+ */
+const CLIP_PERSIST_PER_CALL = 2;
+
+function isExternalClipUrl(url: string | null) {
+  return Boolean(url && !url.startsWith("/manus-storage/"));
+}
+
+/**
+ * Copies up to CLIP_PERSIST_PER_CALL fal.ai-hosted clips into our own storage, returning the
+ * list with those entries rewritten to our keys. A copy that fails is left pointing at fal.ai
+ * and simply retried on the next poll -- never fatal, since the clip itself still exists.
+ */
+async function persistClips(
+  userId: number,
+  project: VideoProject,
+  clipUrls: (string | null)[],
+  accessToken?: string | null,
+): Promise<(string | null)[]> {
+  if (!accessToken) return clipUrls;
+  const pending = clipUrls
+    .map((url, index) => ({ url, index }))
+    .filter(entry => isExternalClipUrl(entry.url))
+    .slice(0, CLIP_PERSIST_PER_CALL);
+  if (!pending.length) return clipUrls;
+
+  const persisted = [...clipUrls];
+  await Promise.all(pending.map(async ({ url, index }) => {
+    try {
+      const response = await fetch(url!);
+      if (!response.ok) throw new Error(`clip download failed (${response.status})`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const stored = await storagePut(`property-projects/${userId}/clips/${project.id}-${index}.mp4`, bytes, "video/mp4", accessToken);
+      persisted[index] = stored.url;
+    } catch (error) {
+      console.warn(`[FalPipeline] could not persist clip ${index + 1} of project ${project.id}, will retry:`, error instanceof Error ? error.message : error);
+    }
+  }));
+  return persisted;
 }
 
 function normalizeClipUrl(value: unknown) {
@@ -478,7 +528,8 @@ export async function refreshFalRender(
     }
   }));
 
-  const completed = clipUrls.filter(Boolean).length;
+  const persistedClipUrls = await persistClips(userId, project, clipUrls, accessToken);
+  const completed = persistedClipUrls.filter(Boolean).length;
   const total = project.mediaUrls.length;
   const renderPhase = failedMessage ? "failed" : completed === total ? "assembly" : "generating";
   const renderProgress = renderPhase === "assembly" ? 95 : 15 + Math.round((completed / total) * 75);
@@ -486,7 +537,7 @@ export async function refreshFalRender(
     promptRequestIds,
     generatedPrompts: prompts,
     falRequestIds: requestIds,
-    clipUrls,
+    clipUrls: persistedClipUrls,
     renderProgress,
     renderPhase,
     renderError: failedMessage,
@@ -497,7 +548,7 @@ export async function refreshFalRender(
     promptRequestIds,
     generatedPrompts: prompts,
     falRequestIds: requestIds,
-    clipUrls,
+    clipUrls: persistedClipUrls,
     renderProgress,
     renderPhase,
     renderError: failedMessage,

@@ -32,6 +32,7 @@ export default function ProjectDetail() {
   const [renderError, setRenderError] = useState<string | null>(null);
   const [sourceAspect, setSourceAspect] = useState<{ w: number; h: number } | null>(null);
   const [failureStreak, setFailureStreak] = useState(0);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const assemblyRef = useRef(false);
   const utils = trpc.useUtils();
   const project = trpc.projects.get.useQuery({ id }, { enabled: Number.isSafeInteger(id) });
@@ -43,6 +44,14 @@ export default function ProjectDetail() {
     },
   );
   const createOutputTarget = trpc.media.createUploadTarget.useMutation();
+  // Buying the next batch of clips is a mutation, never part of the polled status query:
+  // the server holds the project's render lock while it spends, so a duplicate call is a
+  // no-op rather than a second charge.
+  const advanceRender = trpc.projects.advanceRender.useMutation({
+    onSuccess: () => utils.projects.renderStatus.invalidate({ id }),
+  });
+  const shareProject = trpc.projects.share.useMutation();
+  const unshareProject = trpc.projects.unshare.useMutation();
   const complete = trpc.projects.complete.useMutation({
     onSuccess: () => {
       utils.projects.get.invalidate({ id });
@@ -68,8 +77,8 @@ export default function ProjectDetail() {
         }
         return upload;
       }, { label: "final reel upload" });
-      await complete.mutateAsync({ id, finalVideoUrl: target.url });
-      setLocalFinalVideoUrl(target.url);
+      const completed = await complete.mutateAsync({ id, finalVideoUrl: target.url });
+      setLocalFinalVideoUrl(completed.finalVideoUrl);
       setAssemblyProgress({ progress: 100, currentStep: t.project.reelReady });
       setDeliveryNotice(t.project.reelReady);
       toast.success(t.project.reelReady);
@@ -85,6 +94,23 @@ export default function ProjectDetail() {
   useEffect(() => {
     if (render.data?.phase === "assembly" && !localFinalVideoUrl && !assemblyRef.current) void assembleFinalReel();
   }, [render.data?.phase, render.data?.completedShots, localFinalVideoUrl]);
+
+  // The status poll reports when the next fal.ai batch is due but never buys it. Ask for it
+  // exactly once per signal; the server's lock covers the case where two tabs both ask.
+  useEffect(() => {
+    if (!render.data?.needsAdvance || advanceRender.isPending) return;
+    advanceRender.mutate({ id });
+  }, [render.data?.needsAdvance, id]);
+
+  // ffmpeg.wasm runs in this tab. Warn before a close that would abandon it mid-stitch --
+  // the clips themselves are saved server-side, so the work is resumable, but the customer
+  // should know why the reel is not finished.
+  useEffect(() => {
+    if (!assemblyProgress || localFinalVideoUrl) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [assemblyProgress, localFinalVideoUrl]);
 
   // A single "failed" poll is often just a transient hiccup that self-heals on the next
   // poll (a fal.ai shot can be retried by simply polling again). Require it to persist
@@ -120,24 +146,54 @@ export default function ProjectDetail() {
     return { index, sourceUrl, roomType: persisted?.roomType || `${t.project.shotLabel} ${index + 1}`, prompt: persisted?.prompt || "AI direction will appear when generation begins.", state };
   });
 
+  // Mint a public token and copy THAT, not this page's URL. The dashboard URL is scoped to
+  // the owner's account, so a recipient opening it only ever saw "Project not found".
   const share = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
-      setDeliveryNotice(t.project.linkCopied);
-      toast.success(t.project.linkCopied);
-    } catch {
-      toast.error(t.project.shareError);
+      const { shareToken } = await shareProject.mutateAsync({ id });
+      const shareUrl = `${window.location.origin}/s/${shareToken}`;
+      await navigator.clipboard.writeText(shareUrl);
+      setShareUrl(shareUrl);
+      setDeliveryNotice(t.project.shareLinkCopied);
+      toast.success(t.project.shareLinkCopied);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t.project.shareError);
     }
   };
 
-  const download = () => {
+  const unshare = async () => {
+    try {
+      await unshareProject.mutateAsync({ id });
+      setShareUrl(null);
+      setDeliveryNotice(t.project.shareRevoked);
+      toast.success(t.project.shareRevoked);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t.project.shareError);
+    }
+  };
+
+  // Navigating to the signed URL just played the video in the tab. Fetch it and hand the
+  // browser a real file so "Download video" downloads.
+  const download = async () => {
     if (!canDeliver || !finalVideoUrl) {
       toast.error(t.project.notReadyYet);
       return;
     }
-    setDeliveryNotice(t.project.opening);
-    toast.success(t.project.opening);
-    window.setTimeout(() => { window.location.href = finalVideoUrl; }, 600);
+    setDeliveryNotice(t.project.downloadStarted);
+    toast.success(t.project.downloadStarted);
+    try {
+      const response = await fetch(finalVideoUrl);
+      if (!response.ok) throw new Error(`${response.status}`);
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `${safeFileName(data.title)}.mp4`;
+      link.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      // A blocked fetch or an out-of-memory blob should still leave a usable path to the file.
+      window.location.href = finalVideoUrl;
+    }
   };
 
   const isAssembling = renderStatus?.phase === "assembly" || assemblyProgress !== null;
@@ -173,7 +229,8 @@ export default function ProjectDetail() {
             {canDeliver && <div className="mt-4 rounded-2xl border border-[#D29D7F] bg-[#F8EDE6] px-4 py-3 text-sm font-semibold leading-6 text-[#67412B]"><div className="flex items-center gap-2"><CheckCircle2 size={16} />{t.project.reelReadyBanner}</div></div>}
             {deliveryNotice && <div role="status" className="mt-4 rounded-2xl border border-[#D29D7F] bg-[#F8EDE6] px-4 py-3 text-sm font-semibold leading-6 text-[#67412B]">{deliveryNotice}</div>}
             {data.revisionNotes && <div className="mt-4 rounded-2xl border border-[#E2CABC] bg-[#FFF4ED] p-4"><p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#84614D]">{t.project.requestNotes}</p><p className="mt-2 text-sm leading-6 text-[#6D584C]">{data.revisionNotes}</p></div>}
-            <div className="mt-6 grid gap-2"><button disabled={!canDeliver} onClick={download} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white transition hover:bg-[#402E24] disabled:cursor-not-allowed disabled:bg-[#E9E4E1] disabled:text-[#A09A97]"><Download size={16} />{t.project.download}</button><button onClick={share} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[#251811]/12 text-sm font-bold text-[#503F35] transition hover:bg-[#F6F2EF]"><Share2 size={16} />{t.project.share}</button></div>
+            <div className="mt-6 grid gap-2"><button disabled={!canDeliver} onClick={download} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white transition hover:bg-[#402E24] disabled:cursor-not-allowed disabled:bg-[#E9E4E1] disabled:text-[#A09A97]"><Download size={16} />{t.project.download}</button><button disabled={!canDeliver || shareProject.isPending} onClick={share} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[#251811]/12 text-sm font-bold text-[#503F35] transition hover:bg-[#F6F2EF] disabled:cursor-not-allowed disabled:opacity-50"><Share2 size={16} />{t.project.share}</button></div>
+            {shareUrl && <div className="mt-4 rounded-2xl border border-[#251811]/10 bg-[#F7F2EF] p-3"><p className="break-all text-xs leading-5 text-[#6D625B]">{shareUrl}</p><button onClick={unshare} className="mt-2 text-xs font-bold text-[#94522C] underline underline-offset-2">{t.project.unshare}</button></div>}
             <div className="mt-6 flex items-center gap-2 border-t border-[#251811]/8 pt-5 text-xs text-[#877F7A]"><Link2 size={14} />{t.project.privateLink}<span className="ms-auto text-[10px] font-bold uppercase tracking-[.1em] text-[#AAA4A0]">{data.mediaUrls.length} {t.project.framesLabel}</span></div>
           </aside>
         </div>
