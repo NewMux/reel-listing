@@ -7,6 +7,7 @@ import { trpc } from "@/lib/trpc";
 import { FAL_CLIP_SECONDS } from "@shared/video";
 import { CAMERA_PRESETS, matchCameraPreset, ROOM_TYPE_CHOICES } from "@shared/shotPresets";
 import { DEFAULT_REEL_STYLE, REEL_STYLES, reelDurationSeconds } from "@shared/reelStyles";
+import { creditsForReel } from "@shared/credits";
 import { ShotMovePreview } from "@/components/ShotMovePreview";
 
 export default function ProjectReview() {
@@ -80,8 +81,9 @@ export default function ProjectReview() {
   if (project.isLoading) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.loading}</div></AppSidebar>;
   if (!project.data) return <AppSidebar><div className="p-10 text-sm text-[#746A65]">{t.common.projectNotFound}</div></AppSidebar>;
   const data = project.data;
-  // One photo becomes one clip, and one clip costs one credit.
-  const needed = data.mediaUrls.length;
+  // One credit is five seconds of video, so the cost follows the style the customer picked:
+  // a ten-second shot is two credits, a five-second one is a single credit.
+  const needed = creditsForReel(data.mediaUrls.length, shotDirections.data?.clipDurations || []);
   const available = billing.data?.clipCredits ?? 0;
   // Do not block on a balance we have not loaded yet; the server enforces it regardless.
   const affordable = billing.data === undefined || available >= needed;

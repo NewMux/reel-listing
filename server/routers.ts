@@ -4,6 +4,7 @@ import { getPilotGallery, pilotGalleryIds } from "../shared/pilotGalleries";
 import { MAX_PROPERTY_PHOTOS, STAGING_STYLES } from "../shared/video";
 import { cameraPresetIds, findUnsupportedMove, getCameraPreset, ROOM_TYPE_CHOICES } from "../shared/shotPresets";
 import { getReelStyle, reelStyleIds } from "../shared/reelStyles";
+import { creditsForReel } from "../shared/credits";
 import { AUTH_UNAVAILABLE_ERR_MSG, COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -64,8 +65,9 @@ async function startClassificationIfFunded(
   accessToken: string | null,
 ) {
   const credits = await getClipCredits(userId);
-  if (credits < project.mediaUrls.length) {
-    console.info(`[Projects] skipping pre-approval classification for project ${project.id}: ${credits} credits for ${project.mediaUrls.length} photos.`);
+  const needed = creditsForReel(project.mediaUrls.length, project.clipDurations || []);
+  if (credits < needed) {
+    console.info(`[Projects] skipping pre-approval classification for project ${project.id}: ${credits} credits against ${needed} needed.`);
     return;
   }
   try {
@@ -273,8 +275,9 @@ export const appRouter = router({
         throw new TRPCError({ code: "CONFLICT", message: "This project is already starting. Give it a moment." });
       }
 
-      // Credits are per clip, and one photo becomes one clip.
-      const cost = project.mediaUrls.length;
+      // One credit is five seconds of video, so a reel of ten-second shots costs two credits
+      // each. Charging per clip made a short shot cost the same as a long one.
+      const cost = creditsForReel(project.mediaUrls.length, project.clipDurations || []);
       // Unique per approval attempt. A project sent back for changes and approved again is a
       // second, legitimate render that must be charged again, so this cannot be derived from
       // the project id alone. Duplicate-submission safety comes from the render lock above,
@@ -289,12 +292,12 @@ export const appRouter = router({
           amount: -cost,
           entryType: "reservation",
           referenceId: `reservation:project:${input.id}:${attemptRef}`,
-          description: `Render ${cost} clip${cost === 1 ? "" : "s"} for project ${input.id}`,
+          description: `Render ${project.mediaUrls.length} shot${project.mediaUrls.length === 1 ? "" : "s"} for project ${input.id}`,
           projectId: input.id,
         });
         if (remaining === null) {
           const available = await getClipCredits(ctx.user.id);
-          throw new Error(`This reel needs ${cost} clip credit${cost === 1 ? "" : "s"} and you have ${available}. Contact us to top up before rendering.`);
+          throw new Error(`This reel needs ${cost} credit${cost === 1 ? "" : "s"} and you have ${available}. Contact us to top up before rendering.`);
         }
         reserved = true;
 

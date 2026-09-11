@@ -93,7 +93,7 @@ introduced by earlier work and the application was never wired to them. Their de
 and `drizzle/schema.ts` now matches it exactly:
 
 - `billing_accounts.creditBalance` is the **single source of truth** for spendable credit,
-  denominated in clips. There is deliberately no second counter on `users`.
+  denominated in five-second units. There is deliberately no second counter on `users`.
 - `credit_ledger.referenceId` carries a **UNIQUE index** and is the idempotency key. Every
   movement supplies one, shaped `kind:scope:id` (e.g. `purchase:invoice-2026-014`).
 - `credit_entry_type` is a database enum. Rendering uses `reservation` when a render is
@@ -151,7 +151,7 @@ No payment gateway is wired up. Take payment out of band, then grant:
 ```
 admin.grantCredits({
   email: "agent@example.com",
-  clipCredits: 30,
+  clipCredits: 60,
   reason: "Solo plan, invoice 2026-014",
   referenceId: "invoice-2026-014",
 })
@@ -162,7 +162,8 @@ at first sign-in. `referenceId` must be unique per grant; re-sending the same on
 returns the original balance instead of granting twice. It lands in the ledger as
 a `purchase` entry.
 
-One clip credit is one photo. A ten-photo reel costs ten.
+One credit is five seconds of finished video. A ten-photo reel of ten-second shots costs
+twenty; the shorter social style costs half that.
 
 ---
 

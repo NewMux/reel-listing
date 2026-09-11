@@ -8,7 +8,7 @@ import { useLocation } from "wouter";
 // Rows line up with t.pricing.comparison: clip credits, full reels, team members, support.
 // "support" is a placeholder the row renderer swaps for the per-plan support level.
 const COMPARISON_VALUES = [
-  ["30", "80", "200"],
+  ["60", "160", "400"],
   ["3", "8", "20"],
   ["1", "1", "5"],
   ["support", "support", "support"],

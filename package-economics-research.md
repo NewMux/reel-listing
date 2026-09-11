@@ -8,17 +8,19 @@ which is the mode this app uses (`FAL_GENERATE_AUDIO = false`).
 
 Source: https://fal.ai/models/fal-ai/kling-video/v3/pro/image-to-video
 
-Credits are counted per clip, because cost is per clip:
+Credits are counted in five-second units, because that is how the model bills:
 
 | Unit | Cost |
 |---|---|
-| One 10-second clip | $1.12 |
+| One credit (5 seconds of video) | $0.56 |
+| One 10-second shot (2 credits) | $1.12 |
 | Vision classification for one photo (Gemini 2.5 Flash via fal) | about $0.002 |
-| **One clip credit, all in** | **about $1.13** |
-| A full ten-photo listing reel | **about $11.27** |
+| A full ten-photo reel of 10-second shots (20 credits) | **about $11.22** |
 
-A five-second clip costs half of a ten-second one, which is why per-photo clip
-length is a customer-facing control rather than a fixed constant.
+Pricing per clip rather than per second was the earlier model, and it charged a five-second
+shot the same as a ten-second one. That never lost money, but it made the short "Bright and
+quick" reel style cost a customer exactly as much as the long one while using half the
+compute. Pricing in seconds removes the oddity and tracks the bill.
 
 ## Correction to the original business plan
 
@@ -36,25 +38,31 @@ This is a decision to make deliberately, not a bug to fix:
 
 ## Current plans, and the margin behind each
 
-Priced against $1.13 per clip credit:
+Priced against $0.56 per credit:
 
-| Plan | Price / month | Clip credits | Direct cost | Gross margin |
-|---|---|---|---|---|
-| Starter | $99 | 30 | $33.90 | 66% |
-| Pro | $249 | 80 | $90.40 | 64% |
-| Agency | $599 | 200 | $226.00 | 62% |
-| Extra credits | $4 each | 1 | $1.13 | 72% |
+| Plan | Price / month | Credits | Full reels | Direct cost | Gross margin |
+|---|---|---|---|---|---|
+| Solo | $99 | 60 | 3 | $33.60 | 66% |
+| Pro | $249 | 160 | 8 | $89.60 | 64% |
+| Agency | $599 | 400 | 20 | $224.00 | 63% |
+| Extra credits | $2 each | 1 | — | $0.56 | 72% |
 
-These are before payment-processing fees and before the fixed infrastructure
-below. No payment gateway is wired up yet, so credits are granted by an admin
-after payment is taken out of band (`admin.grantCredits`).
+A "full reel" is ten photos at ten seconds each. A customer choosing the shorter social style
+gets twice as many reels from the same credits, and costs correspondingly less to serve.
+
+These figures are before payment-processing fees and before the fixed infrastructure below.
+No payment gateway is wired up yet, so credits are granted by an admin after payment is taken
+out of band (`admin.grantCredits`).
+
+Plan names match the `billing_plan` database enum deliberately, so a granted plan and a
+displayed plan are the same word.
 
 ## Why the 35 BHD package does not work as written
 
 `todo.md` proposed 35 BHD for five completed listings. At the fixed BHD peg of
 1 BHD = 2.659 USD that is $93.07 of revenue against five ten-photo reels, or
-$56.35 of direct cost. That is a **39% gross margin** before any payment fee or
-infrastructure, against 62-66% on the plans above. It should be repriced or
+$56.10 of direct cost. That is a **40% gross margin** before any payment fee or
+infrastructure, against 63-66% on the plans above. It should be repriced or
 retired.
 
 Source for the peg: https://www.cbb.gov.bh/facilities-interest-rates/
