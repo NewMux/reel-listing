@@ -4,6 +4,15 @@ import { index, integer, jsonb, pgEnum, pgTable, serial, text, timestamp, unique
 export const userRole = pgEnum("user_role", ["user", "admin"]);
 export const projectStatus = pgEnum("project_status", ["Uploading", "Processing", "Review", "Done"]);
 export const renderPhase = pgEnum("render_phase", ["idle", "generating", "assembly", "complete", "failed"]);
+export const billingPlan = pgEnum("billing_plan", ["trial", "solo", "pro", "agency", "enterprise"]);
+/**
+ * The movement types the ledger records. reservation/consumption/release are the triple that
+ * matters for rendering: credit is reserved when a render is approved, consumed when the reel
+ * is delivered, and released back if the render never produced anything.
+ */
+export const creditEntryType = pgEnum("credit_entry_type", [
+  "trial", "purchase", "subscription", "reservation", "consumption", "release", "refund", "adjustment", "expiry",
+]);
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -12,15 +21,6 @@ export const users = pgTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: userRole("role").default("user").notNull(),
-  /**
-   * Credits are counted in CLIPS, not whole videos: one photo becomes one clip, and a
-   * ten-photo reel costs ten. Billing per project charged a one-photo reel the same as a
-   * ten-photo one despite costing a tenth as much to produce.
-   *
-   * Defaults to zero. A render spends real money at fal.ai, so credit must follow a
-   * payment or an explicit admin grant -- never a bare signup.
-   */
-  clipCreditsRemaining: integer("clipCreditsRemaining").default(0).notNull(),
   stagingCreditsRemaining: integer("stagingCreditsRemaining").default(0).notNull(),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
@@ -91,41 +91,49 @@ export const contactMessages = pgTable("contact_messages", {
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
 });
 
-/** One row per user: the plan they are on, and the handle a payment gateway will key off. */
+/**
+ * One row per user: the plan they are on, their credit balance, and the handles a payment
+ * gateway will key off. `creditBalance` is the materialised balance and the single source of
+ * truth for what an account may spend; `credit_ledger` is the audit trail that explains it.
+ */
 export const billingAccounts = pgTable("billing_accounts", {
   id: serial("id").primaryKey(),
   userId: integer("userId").notNull(),
-  plan: varchar("plan", { length: 64 }).default("none").notNull(),
-  status: varchar("status", { length: 32 }).default("inactive").notNull(),
-  /** Customer id at whichever gateway is eventually wired up. Null until then. */
+  plan: billingPlan("plan").default("trial").notNull(),
+  status: varchar("status", { length: 32 }).default("active").notNull(),
+  /** Denominated in CLIPS. One property photo becomes one clip; a ten-photo reel costs ten. */
+  creditBalance: integer("creditBalance").default(0).notNull(),
   externalCustomerId: varchar("externalCustomerId", { length: 160 }),
+  externalSubscriptionId: varchar("externalSubscriptionId", { length: 160 }),
+  currentPeriodEnd: timestamp("currentPeriodEnd", { withTimezone: true }),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
 }, table => [uniqueIndex("billing_accounts_user_idx").on(table.userId)]);
 
-export const creditLedgerKinds = ["grant", "spend", "refund", "adjustment"] as const;
-export type CreditLedgerKind = (typeof creditLedgerKinds)[number];
-
 /**
- * Every movement of credit, in order. `users.clipCreditsRemaining` is the materialised
- * balance -- it stays a plain integer so the oversell guard can remain one atomic
- * conditional UPDATE -- and this table is the audit trail that explains how it got there.
+ * Every movement of credit, in order.
+ *
+ * `referenceId` is UNIQUE and carries the idempotency: a retried grant or a re-submitted
+ * reservation collides on the index instead of moving credit twice. Existing rows use a
+ * `kind:scope:id` shape, e.g. `trial:user:114`.
  */
 export const creditLedger = pgTable("credit_ledger", {
   id: serial("id").primaryKey(),
+  billingAccountId: integer("billingAccountId").notNull(),
   userId: integer("userId").notNull(),
-  /** Signed: positive for grants and refunds, negative for spends. */
-  delta: integer("delta").notNull(),
-  kind: varchar("kind", { length: 32 }).$type<CreditLedgerKind>().notNull(),
-  reason: text("reason"),
   projectId: integer("projectId"),
-  /** Makes a retried grant or spend a no-op rather than a second charge. */
-  idempotencyKey: varchar("idempotencyKey", { length: 160 }),
-  balanceAfter: integer("balanceAfter"),
+  entryType: creditEntryType("entryType").notNull(),
+  /** Signed: positive for grants and releases, negative for reservations and consumption. */
+  amount: integer("amount").notNull(),
+  balanceAfter: integer("balanceAfter").notNull(),
+  referenceId: varchar("referenceId", { length: 160 }).notNull(),
+  description: text("description"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
 }, table => [
-  index("credit_ledger_user_idx").on(table.userId, table.createdAt),
-  uniqueIndex("credit_ledger_idempotency_idx").on(table.idempotencyKey),
+  index("credit_ledger_account_idx").on(table.billingAccountId, table.createdAt),
+  index("credit_ledger_project_idx").on(table.projectId),
+  uniqueIndex("credit_ledger_reference_idx").on(table.referenceId),
 ]);
 
 export type User = typeof users.$inferSelect;
@@ -135,5 +143,6 @@ export type InsertVideoProject = typeof videoProjects.$inferInsert;
 export type ContactMessage = typeof contactMessages.$inferSelect;
 export type InsertContactMessage = typeof contactMessages.$inferInsert;
 export type BillingAccount = typeof billingAccounts.$inferSelect;
+export type CreditEntryType = (typeof creditEntryType.enumValues)[number];
 export type CreditLedgerEntry = typeof creditLedger.$inferSelect;
 export type InsertCreditLedgerEntry = typeof creditLedger.$inferInsert;

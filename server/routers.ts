@@ -273,21 +273,28 @@ export const appRouter = router({
 
       // Credits are per clip, and one photo becomes one clip.
       const cost = project.mediaUrls.length;
-      let spent = false;
+      // Unique per approval attempt. A project sent back for changes and approved again is a
+      // second, legitimate render that must be charged again, so this cannot be derived from
+      // the project id alone. Duplicate-submission safety comes from the render lock above,
+      // which only one caller can hold; this reference is the ledger's audit key and the
+      // handle the release below uses to pair with the reservation.
+      const attemptRef = newShareToken().slice(0, 16);
+      let reserved = false;
       try {
         const transition = getApprovalTransition(project.status);
         const remaining = await moveCredits({
           userId: ctx.user.id,
-          delta: -cost,
-          kind: "spend",
-          reason: `Render ${cost} clip${cost === 1 ? "" : "s"} for project ${input.id}`,
+          amount: -cost,
+          entryType: "reservation",
+          referenceId: `reservation:project:${input.id}:${attemptRef}`,
+          description: `Render ${cost} clip${cost === 1 ? "" : "s"} for project ${input.id}`,
           projectId: input.id,
         });
         if (remaining === null) {
           const available = await getClipCredits(ctx.user.id);
           throw new Error(`This reel needs ${cost} clip credit${cost === 1 ? "" : "s"} and you have ${available}. Contact us to top up before rendering.`);
         }
-        spent = true;
+        reserved = true;
 
         const render = await submitFalRender(ctx.user.id, project, ctx.supabaseAccessToken);
         const updated = await updateVideoProject(ctx.user.id, input.id, { ...transition, creditsSpent: cost });
@@ -302,15 +309,16 @@ export const appRouter = router({
         ]);
         return { project: presentedProject, render: presentedRender };
       } catch (error) {
-        // Nothing was rendered, so give the credits back -- exactly what was taken.
-        if (spent) {
+        // Nothing was rendered, so release the reservation -- exactly what it took.
+        if (reserved) {
           await moveCredits({
             userId: ctx.user.id,
-            delta: cost,
-            kind: "refund",
-            reason: `Render never started for project ${input.id}`,
+            amount: cost,
+            entryType: "release",
+            referenceId: `release:project:${input.id}:${attemptRef}`,
+            description: `Render never started for project ${input.id}`,
             projectId: input.id,
-          }).catch(refundError => console.error(`[Projects] refund failed for project ${input.id}:`, refundError));
+          }).catch(releaseError => console.error(`[Projects] credit release failed for project ${input.id}:`, releaseError));
         }
         console.error(`[Projects] approve failed for project ${input.id}:`, error);
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to start rendering." });
@@ -573,15 +581,15 @@ export const appRouter = router({
   billing: router({
     /** What this account can spend, and the history behind it. */
     summary: protectedProcedure.query(async ({ ctx }) => {
-      const [clipCredits, account, ledger] = await Promise.all([
-        getClipCredits(ctx.user.id),
-        ensureBillingAccount(ctx.user.id),
-        listCreditLedger(ctx.user.id),
-      ]);
+      // ensureBillingAccount creates the trial row on first read, so it has to settle before
+      // the balance is read -- otherwise a brand-new account reports 0 from a row that does
+      // not exist yet and the two disagree.
+      const account = await ensureBillingAccount(ctx.user.id);
+      const ledger = await listCreditLedger(ctx.user.id);
       return {
-        clipCredits,
+        clipCredits: account?.creditBalance ?? 0,
         stagingCredits: ctx.user.stagingCreditsRemaining,
-        plan: account?.plan ?? "none",
+        plan: account?.plan ?? "trial",
         status: account?.status ?? "inactive",
         ledger,
       };
@@ -592,7 +600,7 @@ export const appRouter = router({
      * Grants clip credits to an account by email.
      *
      * This is the billing seam until a payment gateway is wired up: the owner takes payment
-     * out of band and grants the matching credits here. `idempotencyKey` is what stops a
+     * out of band and grants the matching credits here. `referenceId` is what stops a
      * double-submitted grant from handing out twice the credit.
      */
     grantCredits: adminProcedure
@@ -600,17 +608,18 @@ export const appRouter = router({
         email: z.string().trim().email().max(320),
         clipCredits: z.number().int().min(1).max(10_000),
         reason: z.string().trim().min(3).max(500),
-        idempotencyKey: z.string().trim().min(8).max(160),
+        /** Unique per grant, e.g. an invoice number. Re-sending the same one grants nothing. */
+        referenceId: z.string().trim().min(4).max(120),
       }))
       .mutation(async ({ input }) => {
         const target = await getUserByEmail(input.email);
         if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "No account with that email address." });
         const balance = await moveCredits({
           userId: target.id,
-          delta: input.clipCredits,
-          kind: "grant",
-          reason: input.reason,
-          idempotencyKey: input.idempotencyKey,
+          amount: input.clipCredits,
+          entryType: "purchase",
+          referenceId: `purchase:${input.referenceId}`,
+          description: input.reason,
         });
         return { userId: target.id, email: input.email, clipCredits: balance };
       }),

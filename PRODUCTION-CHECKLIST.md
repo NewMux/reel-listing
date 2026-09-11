@@ -32,7 +32,7 @@ this work. **Todo** needed, not yet built. **N/A** does not apply, with reason.
 | Retries | **Existing** | `shared/retry.ts`, used for storage, uploads, and clip downloads. |
 | Exponential Backoff | **Existing** | Equal-jitter backoff in `shared/retry.ts`. |
 | Backpressure | **Todo** | Rate limits cap arrival, but there is no queue depth to push back on. Revisit if a worker is added. |
-| Idempotency | **Done** | Render lock on `video_projects.renderLockedAt`; `credit_ledger.idempotencyKey` on grants. |
+| Idempotency | **Done** | Render lock on `video_projects.renderLockedAt`; the UNIQUE `credit_ledger.referenceId` on every credit movement. |
 | Circuit Breakers | **Todo** | A sustained fal.ai outage currently burns retries per request. Worth adding if fal.ai proves flaky. |
 
 ## Concurrency and correctness
@@ -60,7 +60,7 @@ this work. **Todo** needed, not yet built. **N/A** does not apply, with reason.
 | Read Replicas | **N/A** | Read volume is trivial. A replica would add lag and cost for no benefit. |
 | Sharding / Partitioning | **N/A** | Thousands of rows. Revisit somewhere past tens of millions. |
 | Replication | **Existing** | Supabase runs it. |
-| Database Migrations | **Existing** | Numbered SQL under `drizzle/`, applied in order. |
+| Database Migrations | **Done** | Numbered SQL under `drizzle/`. Production was four migrations behind and sign-in was broken as a result; `0012` reconciles it. See DEPLOYMENT.md. |
 | Schema Versioning | **Existing** | Same. Note the `drizzle/meta/_journal.json` caveat in DEPLOYMENT.md. |
 | Backups | **Todo** | Supabase takes daily backups on Pro. A restore has never been tested; see DEPLOYMENT.md. |
 | Eventual Consistency | **N/A** | One primary database, read-your-writes throughout. |
@@ -71,7 +71,7 @@ this work. **Todo** needed, not yet built. **N/A** does not apply, with reason.
 
 | Item | Status | Notes |
 |---|---|---|
-| Row Level Security | **Done** | Was **off** on `users` and `video_projects` with the anon key public. Revoked and enabled in `drizzle/0010`. |
+| Row Level Security | **Done** | Was **off** on `users` and `video_projects` with the anon key public. Revoked and enabled via `drizzle/0010`, applied and verified in production. |
 | Authentication | **Existing** | Supabase Auth, verified server-side per request in `server/_core/context.ts`. |
 | Authorization | **Existing** | Every project query is scoped to `ctx.user.id`; `adminProcedure` gates the credit grant. |
 | IAM | **Existing** | Supabase roles plus the app's own `user`/`admin` role column. |
@@ -163,11 +163,15 @@ this work. **Todo** needed, not yet built. **N/A** does not apply, with reason.
 
 ---
 
-## The three things most worth doing next
+## The four things most worth doing next
 
-1. **Alerting on fal.ai spend.** Everything else in this repo is now bounded by
+1. **Get off the Supabase and Vercel free tiers.** The database auto-paused during this
+   work, which takes the site down completely and makes the security advisor return an
+   empty result that reads as a clean bill of health. Vercel Hobby separately prohibits
+   commercial use.
+2. **Alerting on fal.ai spend.** Everything else in this repo is now bounded by
    credits, but a bug or an abuse path would still be discovered by reading a
    bill. A spend alert on the fal.ai account catches it in hours instead.
-2. **Test a database restore.** Backups nobody has restored are not backups.
-3. **A cron sweep for abandoned renders.** Clips are saved now, so a project
+3. **Test a database restore.** Backups nobody has restored are not backups.
+4. **A cron sweep for abandoned renders.** Clips are saved now, so a project
    stuck mid-assembly is recoverable, but nothing tells anyone it is stuck.

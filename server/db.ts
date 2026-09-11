@@ -1,7 +1,7 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { and, desc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
-import { billingAccounts, contactMessages, creditLedger, CreditLedgerKind, InsertContactMessage, InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
+import { billingAccounts, contactMessages, creditLedger, CreditEntryType, InsertContactMessage, InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -57,54 +57,83 @@ export async function getUserByOpenId(openId: string) {
 
 type CreditMovement = {
   userId: number;
-  /** Positive to grant or refund, negative to spend. */
-  delta: number;
-  kind: CreditLedgerKind;
-  reason: string;
+  /** Signed, in clips: negative to reserve or consume, positive to grant or release. */
+  amount: number;
+  entryType: CreditEntryType;
+  /**
+   * Unique across the whole ledger, and the thing that makes a movement idempotent. Shaped
+   * `kind:scope:id`, matching the rows already in this table (e.g. `trial:user:114`). A retry
+   * collides on the unique index and moves nothing.
+   */
+  referenceId: string;
+  description?: string | null;
   projectId?: number | null;
-  /** Supplying this makes a retry of the same movement a no-op instead of a second charge. */
-  idempotencyKey?: string | null;
+  metadata?: Record<string, unknown> | null;
 };
+
+/** Reads a user's billing account, creating the default trial row the first time. */
+export async function ensureBillingAccount(userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  // Let the column defaults supply plan and status: they are database enums, and naming
+  // labels here is how you end up passing one the type does not have.
+  await db.insert(billingAccounts).values({ userId }).onConflictDoNothing({ target: billingAccounts.userId });
+  const result = await db.select().from(billingAccounts).where(eq(billingAccounts.userId, userId)).limit(1);
+  return result[0];
+}
 
 /**
  * Moves clip credits and records why, in one transaction.
  *
- * `users.clipCreditsRemaining` is the materialised balance, so a spend stays a single
- * conditional UPDATE (`... WHERE clipCreditsRemaining >= n`). That is what makes overselling
- * impossible under concurrency: two racing spends both hit the same row, and the second one
+ * `billing_accounts.creditBalance` is the materialised balance, so a reservation stays a
+ * single conditional UPDATE (`... WHERE creditBalance >= n`). That is what makes overselling
+ * impossible under concurrency: two racing reservations hit the same row, and the second
  * matches no rows once the first has drawn the balance down. The ledger row written beside it
  * is the audit trail.
  *
- * Returns the new balance, or null when the spend was refused for want of credit.
+ * Returns the new balance, or null when the movement was refused for want of credit.
  */
 export async function moveCredits(movement: CreditMovement): Promise<number | null> {
   const db = await getDb();
   if (!db) throw new Error("Account storage is temporarily unavailable.");
-  const { userId, delta, kind, reason, projectId = null, idempotencyKey = null } = movement;
-  if (!Number.isSafeInteger(delta) || delta === 0) throw new Error("A credit movement must be a non-zero whole number.");
+  const { userId, amount, entryType, referenceId, description = null, projectId = null, metadata = null } = movement;
+  if (!Number.isSafeInteger(amount) || amount === 0) throw new Error("A credit movement must be a non-zero whole number.");
+
+  const account = await ensureBillingAccount(userId);
+  if (!account) throw new Error("Account storage is temporarily unavailable.");
 
   return db.transaction(async tx => {
-    if (idempotencyKey) {
-      const seen = await tx
-        .select({ balanceAfter: creditLedger.balanceAfter })
-        .from(creditLedger)
-        .where(eq(creditLedger.idempotencyKey, idempotencyKey))
-        .limit(1);
-      // Already applied. Return the balance it produced rather than applying it twice.
-      if (seen[0]) return seen[0].balanceAfter ?? null;
-    }
+    const seen = await tx
+      .select({ balanceAfter: creditLedger.balanceAfter })
+      .from(creditLedger)
+      .where(eq(creditLedger.referenceId, referenceId))
+      .limit(1);
+    // Already applied. Return the balance it produced rather than applying it twice.
+    if (seen[0]) return seen[0].balanceAfter;
 
     const updated = await tx
-      .update(users)
-      .set({ clipCreditsRemaining: sql`${users.clipCreditsRemaining} + ${delta}`, updatedAt: new Date() })
-      // Only a spend can be refused; a grant or refund always applies.
-      .where(delta < 0 ? and(eq(users.id, userId), gte(users.clipCreditsRemaining, -delta)) : eq(users.id, userId))
-      .returning({ clipCreditsRemaining: users.clipCreditsRemaining });
+      .update(billingAccounts)
+      .set({ creditBalance: sql`${billingAccounts.creditBalance} + ${amount}`, updatedAt: new Date() })
+      // Only a debit can be refused; a grant or release always applies.
+      .where(amount < 0
+        ? and(eq(billingAccounts.id, account.id), gte(billingAccounts.creditBalance, -amount))
+        : eq(billingAccounts.id, account.id))
+      .returning({ creditBalance: billingAccounts.creditBalance });
 
-    const balanceAfter = updated[0]?.clipCreditsRemaining;
+    const balanceAfter = updated[0]?.creditBalance;
     if (balanceAfter === undefined) return null;
 
-    await tx.insert(creditLedger).values({ userId, delta, kind, reason, projectId, idempotencyKey, balanceAfter });
+    await tx.insert(creditLedger).values({
+      billingAccountId: account.id,
+      userId,
+      projectId,
+      entryType,
+      amount,
+      balanceAfter,
+      referenceId,
+      description,
+      metadata,
+    });
     return balanceAfter;
   });
 }
@@ -113,8 +142,8 @@ export async function moveCredits(movement: CreditMovement): Promise<number | nu
 export async function getClipCredits(userId: number): Promise<number> {
   const db = await getDb();
   if (!db) return 0;
-  const result = await db.select({ clipCreditsRemaining: users.clipCreditsRemaining }).from(users).where(eq(users.id, userId)).limit(1);
-  return result[0]?.clipCreditsRemaining ?? 0;
+  const result = await db.select({ creditBalance: billingAccounts.creditBalance }).from(billingAccounts).where(eq(billingAccounts.userId, userId)).limit(1);
+  return result[0]?.creditBalance ?? 0;
 }
 
 /** The account's credit history, newest first, for the billing panel. */
@@ -131,16 +160,7 @@ export async function getUserByEmail(email: string) {
   return result[0];
 }
 
-/** Reads the user's billing account, creating the default inactive row the first time. */
-export async function ensureBillingAccount(userId: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-  await db.insert(billingAccounts).values({ userId }).onConflictDoNothing({ target: billingAccounts.userId });
-  const result = await db.select().from(billingAccounts).where(eq(billingAccounts.userId, userId)).limit(1);
-  return result[0];
-}
-
-/** Atomically decrements the user's virtual-staging credit balance. Returns the new count, or null if they have none left. */
+/** Atomically decrements the user's virtual-staging credit balance./** Atomically decrements the user's virtual-staging credit balance. Returns the new count, or null if they have none left. */
 export async function decrementStagingCredits(userId: number): Promise<number | null> {
   const db = await getDb();
   if (!db) throw new Error("Account storage is temporarily unavailable.");
