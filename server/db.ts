@@ -230,7 +230,7 @@ export async function insertContactMessage(entry: InsertContactMessage) {
 export async function updateVideoProject(
   userId: number,
   projectId: number,
-  updates: Partial<Pick<InsertVideoProject, "status" | "revisionNotes" | "finalVideoUrl" | "promptRequestIds" | "generatedPrompts" | "shotAnalysis" | "customCameraMoves" | "clipDurations" | "falRequestIds" | "clipUrls" | "renderProgress" | "renderPhase" | "renderError" | "mediaUrls" | "mediaKeys" | "mediaNames" | "mediaTypes" | "creditsSpent" | "renderLockedAt" | "shareToken">>,
+  updates: Partial<Pick<InsertVideoProject, "status" | "revisionNotes" | "finalVideoUrl" | "promptRequestIds" | "generatedPrompts" | "shotAnalysis" | "customCameraMoves" | "clipDurations" | "falRequestIds" | "clipUrls" | "renderProgress" | "renderPhase" | "renderError" | "mediaUrls" | "mediaKeys" | "mediaNames" | "mediaTypes" | "creditsSpent" | "renderLockedAt" | "shareToken" | "reelStyle">>,
 ) {
   const db = await getDb();
   if (!db) throw new Error("Project storage is temporarily unavailable.");

@@ -72,6 +72,12 @@ export const videoProjects = pgTable(
     renderLockedAt: timestamp("renderLockedAt", { withTimezone: true }),
     /** Unguessable token behind the public share link; null once the owner revokes sharing. */
     shareToken: varchar("shareToken", { length: 64 }),
+    /**
+     * The one listing-level pacing choice (see shared/reelStyles.ts). Sets clip length for
+     * every shot and the crossfade used at assembly, which can run in a later session than
+     * approval -- hence a column rather than client state.
+     */
+    reelStyle: varchar("reelStyle", { length: 32 }).default("balanced").notNull(),
     createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
   },

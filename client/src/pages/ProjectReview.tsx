@@ -6,6 +6,8 @@ import { copy, useLocale } from "@/lib/locale";
 import { trpc } from "@/lib/trpc";
 import { FAL_CLIP_SECONDS } from "@shared/video";
 import { CAMERA_PRESETS, matchCameraPreset, ROOM_TYPE_CHOICES } from "@shared/shotPresets";
+import { DEFAULT_REEL_STYLE, REEL_STYLES, reelDurationSeconds } from "@shared/reelStyles";
+import { ShotMovePreview } from "@/components/ShotMovePreview";
 
 export default function ProjectReview() {
   const { locale, isRtl } = useLocale();
@@ -40,6 +42,9 @@ export default function ProjectReview() {
   });
   const reorder = trpc.projects.reorder.useMutation({
     onSuccess: () => utils.projects.get.invalidate({ id }),
+  });
+  const setReelStyle = trpc.projects.setReelStyle.useMutation({
+    onSuccess: () => utils.projects.shotDirections.invalidate({ id }),
   });
   const updateShotOverride = trpc.projects.updateShotOverride.useMutation({
     onSuccess: (_data, variables) => {
@@ -86,6 +91,8 @@ export default function ProjectReview() {
   const duration = durations.reduce((sum, seconds) => sum + seconds, 0);
   const eachLabel = durations.every(seconds => seconds === durations[0]) ? `${durations[0]}s` : "5–10s";
   const canReorder = data.status === "Review";
+  const activeStyle = shotDirections.data?.reelStyle ?? DEFAULT_REEL_STYLE;
+  const finishedSeconds = Math.round(reelDurationSeconds(clipCount, activeStyle));
   const moveShot = (index: number, direction: -1 | 1) => {
     const nextIndex = index + direction;
     if (!canReorder || reorder.isPending || nextIndex < 0 || nextIndex >= data.mediaUrls.length) return;
@@ -128,6 +135,33 @@ export default function ProjectReview() {
             <div className="mt-7 rounded-2xl border border-[#251811]/8 bg-[#F8F5F3] p-4">
               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.1em] text-[#825E49]"><Sparkles size={14} />{t.review.storyboard}</div>
               <p className="mt-2 text-[11px] leading-4 text-[#8A7F79]">{t.shot.freeEditsNote}</p>
+
+              <div className="mt-4 rounded-xl bg-white p-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#8A7F79]">{t.reel.styleLabel}</p>
+                  <p className="text-[10px] font-semibold text-[#8A7F79]">{t.reel.lengthLabel}: {finishedSeconds}s</p>
+                </div>
+                <p className="mt-1 text-[11px] leading-4 text-[#9A918C]">{t.reel.styleHint}</p>
+                <div className="mt-2.5 grid gap-1.5 sm:grid-cols-3">
+                  {REEL_STYLES.map(style => {
+                    const [label, blurb] = t.reel.styles[style.id];
+                    const selected = activeStyle === style.id;
+                    return (
+                      <button
+                        key={style.id}
+                        type="button"
+                        disabled={!canReorder || setReelStyle.isPending}
+                        onClick={() => setReelStyle.mutate({ id, style: style.id })}
+                        className={`rounded-lg border p-2.5 text-start transition disabled:opacity-50 ${selected ? "border-[#251811] bg-[#251811] text-white" : "border-[#251811]/10 bg-[#FAF8F7] text-[#4C3B31] hover:border-[#B98A6B]"}`}
+                      >
+                        <span className="block text-[11px] font-bold">{label}</span>
+                        <span className={`mt-1 block text-[10px] leading-4 ${selected ? "text-[#D5CFCB]" : "text-[#8A7F79]"}`}>{blurb}</span>
+                        <span className={`mt-1.5 block text-[10px] font-bold ${selected ? "text-[#E9C6B2]" : "text-[#95795F]"}`}>{style.clipSeconds}s {t.review.clipsLabel}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <div className="mt-3 space-y-2.5">
                 {data.mediaUrls.map((_, index) => {
                   const hasOverride = !!shotDirections.data?.customCameraMoves?.[index];
@@ -141,18 +175,17 @@ export default function ProjectReview() {
                         <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#E9C6B2] text-[10px] font-bold text-[#6B422A]">{index + 1}</span>
                         <p className="flex-1 truncate text-xs font-bold text-[#4C3B31]">{shots ? shots[index]?.roomType : t.review.analyzing}</p>
                         {hasOverride && <span className="shrink-0 rounded-full bg-[#E9C6B2] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[.06em] text-[#6B422A]">{t.review.customBadge}</span>}
-                        <div className="flex shrink-0 gap-1">
-                          {([5, 10] as const).map(seconds => (
-                            <button
-                              key={seconds}
-                              type="button"
-                              disabled={!canReorder || updateShotOverride.isPending}
-                              onClick={() => updateShotOverride.mutate({ id, index, durationSeconds: seconds })}
-                              className={`h-7 rounded-full px-2.5 text-[10px] font-bold transition ${activeDuration === seconds ? "bg-[#251811] text-white" : "bg-[#F3EBE7] text-[#795E4E] hover:bg-[#EADFD9]"} disabled:opacity-50`}
-                            >{seconds}s</button>
-                          ))}
-                        </div>
+                        <span className="shrink-0 rounded-full bg-[#F3EBE7] px-2 py-0.5 text-[10px] font-bold text-[#795E4E]">{activeDuration}s</span>
                       </div>
+                      {activePreset && data.mediaUrls[index] && (
+                        <div className="mt-3">
+                          <p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#8A7F79]">{t.shot.howItMoves}</p>
+                          <div className="mt-1.5">
+                            <ShotMovePreview src={data.mediaUrls[index]} preset={activePreset} alt={`${t.review.photoAlt} ${index + 1}`} />
+                          </div>
+                        </div>
+                      )}
+
                       <div className="mt-3">
                         <p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#8A7F79]">{t.shot.movementLabel}</p>
                         <div className="mt-1.5 flex flex-wrap gap-1.5">

@@ -6,6 +6,7 @@ import { AppSidebar, StatusPill } from "@/components/AppChrome";
 import { stitchClips, type StitchProgress } from "@/lib/stitchVideos";
 import { copy, Locale, useLocale } from "@/lib/locale";
 import { trpc } from "@/lib/trpc";
+import { getReelStyle } from "@shared/reelStyles";
 import { withRetry } from "@shared/retry";
 
 function estimate(status: string, locale: Locale) {
@@ -67,7 +68,14 @@ export default function ProjectDetail() {
     setRenderError(null);
     setDeliveryNotice(null);
     try {
-      const finalBlob = await stitchClips(clipUrls as string[], render.data?.clipDurations || [], progress => setAssemblyProgress(progress));
+      // The crossfade comes from the style the customer chose at review, which is why it is
+      // persisted on the project: assembly can run in a later session than approval.
+      const finalBlob = await stitchClips(
+        clipUrls as string[],
+        render.data?.clipDurations || [],
+        progress => setAssemblyProgress(progress),
+        getReelStyle(project.data?.reelStyle).transitionSeconds,
+      );
       const target = await createOutputTarget.mutateAsync({ name: `${safeFileName(project.data?.title || "reel-listing-film")}.mp4`, type: "video/mp4" });
       await withRetry(async () => {
         const upload = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": "video/mp4" }, body: finalBlob });

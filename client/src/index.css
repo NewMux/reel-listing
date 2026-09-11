@@ -85,3 +85,41 @@ button:not(:disabled):active, a[href]:active { transform: scale(.975); }
 @media (max-width: 640px) {
   .hide-mobile { display: none; }
 }
+
+/* Schematic camera-move previews (see components/ShotMovePreview.tsx). Each loops a slow
+   approximation of one movement over the customer's own photo, so a non-technical customer
+   can see what a named move means instead of parsing a sentence about gimbals.
+   Transforms only, so these stay off the main thread. */
+@media (prefers-reduced-motion: no-preference) {
+  .rl-push-in { animation: rl-push-in 5s ease-in-out infinite alternate; }
+  .rl-pull-back { animation: rl-pull-back 5s ease-in-out infinite alternate; }
+  .rl-glide-across { animation: rl-glide-across 5s ease-in-out infinite alternate; }
+  .rl-curve-around { animation: rl-curve-around 6s ease-in-out infinite alternate; }
+  .rl-toward-light { animation: rl-toward-light 5s ease-in-out infinite alternate; }
+  .rl-over-detail { animation: rl-over-detail 5s ease-in-out infinite alternate; }
+}
+
+@keyframes rl-push-in {
+  from { transform: translate(-50%, -50%) scale(0.7); }
+  to   { transform: translate(-50%, -50%) scale(0.88); }
+}
+@keyframes rl-pull-back {
+  from { transform: translate(-50%, -50%) scale(0.9); }
+  to   { transform: translate(-50%, -50%) scale(0.68); }
+}
+@keyframes rl-glide-across {
+  from { transform: translate(-58%, -50%) scale(0.78); }
+  to   { transform: translate(-42%, -50%) scale(0.78); }
+}
+@keyframes rl-curve-around {
+  from { transform: translate(-56%, -48%) scale(0.76) rotate(-1.2deg); }
+  to   { transform: translate(-44%, -52%) scale(0.82) rotate(1.2deg); }
+}
+@keyframes rl-toward-light {
+  from { transform: translate(-46%, -52%) scale(0.72); }
+  to   { transform: translate(-54%, -47%) scale(0.86); }
+}
+@keyframes rl-over-detail {
+  from { transform: translate(-50%, -46%) scale(0.74); }
+  to   { transform: translate(-50%, -54%) scale(0.84); }
+}

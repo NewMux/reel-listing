@@ -10,8 +10,9 @@ export type StitchProgress = {
   currentStep: string;
 };
 
-// Standard, tasteful crossfade length for a real-estate reel -- long enough to read as a
-// dissolve rather than a flicker, short enough not to eat into each room's own shot.
+// Fallback crossfade, used when no reel style is supplied. The style normally decides this
+// (see shared/reelStyles.ts): long enough to read as a dissolve rather than a flicker, short
+// enough not to eat into each room's own shot.
 const TRANSITION_SECONDS = 0.6;
 
 let ffmpeg: FFmpeg | null = null;
@@ -151,6 +152,7 @@ export async function stitchClips(
   clipUrls: string[],
   clipDurations: (number | null)[],
   onProgress: (progress: StitchProgress) => void,
+  transitionSeconds: number = TRANSITION_SECONDS,
 ) {
   if (clipUrls.length === 0 || clipUrls.some(url => !url)) {
     throw new Error("All generated clips must be ready before assembly.");
@@ -186,7 +188,7 @@ export async function stitchClips(
     }
   } else {
     onProgress({ progress: 86, currentStep: "Blending clips into a cinematic dissolve…" });
-    const filterComplex = buildCrossfadeFilter(durations, TRANSITION_SECONDS);
+    const filterComplex = buildCrossfadeFilter(durations, transitionSeconds);
     const inputArgs = normalizedFiles.flatMap(filename => ["-i", filename]);
     const commonArgs = [
       "-y",

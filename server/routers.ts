@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getPilotGallery, pilotGalleryIds } from "../shared/pilotGalleries";
 import { MAX_PROPERTY_PHOTOS, STAGING_STYLES } from "../shared/video";
 import { cameraPresetIds, findUnsupportedMove, getCameraPreset, ROOM_TYPE_CHOICES } from "../shared/shotPresets";
+import { getReelStyle, reelStyleIds } from "../shared/reelStyles";
 import { AUTH_UNAVAILABLE_ERR_MSG, COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -462,7 +463,7 @@ export const appRouter = router({
         projectIdInput(input.id);
         const project = await getVideoProject(ctx.user.id, input.id);
         if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
-        const overrides = { customCameraMoves: project.customCameraMoves || [], clipDurations: project.clipDurations || [] };
+        const overrides = { customCameraMoves: project.customCameraMoves || [], clipDurations: project.clipDurations || [], reelStyle: project.reelStyle };
         if (project.status !== "Review" || !project.promptRequestIds?.length) {
           return { shots: getShotPlan(project.mediaUrls, project.generatedPrompts || []), shotAnalysis: project.shotAnalysis || [], ready: true, ...overrides };
         }
@@ -535,10 +536,50 @@ export const appRouter = router({
 
           const updated = await updateVideoProject(ctx.user.id, input.id, { customCameraMoves, clipDurations, shotAnalysis: analysisList, generatedPrompts });
           if (!updated) throw new Error("The project could not be updated.");
-          return { shots: getShotPlan(updated.mediaUrls, updated.generatedPrompts || []), shotAnalysis: updated.shotAnalysis || [], customCameraMoves: updated.customCameraMoves || [], clipDurations: updated.clipDurations || [], ready: true };
+          return { shots: getShotPlan(updated.mediaUrls, updated.generatedPrompts || []), shotAnalysis: updated.shotAnalysis || [], customCameraMoves: updated.customCameraMoves || [], clipDurations: updated.clipDurations || [], reelStyle: updated.reelStyle, ready: true };
         } catch (error) {
           console.error(`[Projects] updateShotOverride failed for project ${input.id}, index ${input.index}:`, error);
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to update this shot." });
+        }
+      }),
+    /**
+     * Sets the listing-level pacing style, applying its clip length to every shot at once.
+     *
+     * Free, like every other pre-approval edit: prompts are rebuilt from the analysis already
+     * on the project, so no fal.ai call is involved.
+     */
+    setReelStyle: protectedProcedure
+      .input(z.object({ id: z.number().int().positive(), style: z.enum(reelStyleIds) }))
+      .mutation(async ({ ctx, input }) => {
+        projectIdInput(input.id);
+        const project = await getVideoProject(ctx.user.id, input.id);
+        if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+        try {
+          if (project.status !== "Review") {
+            throw new Error("The style can only be changed before production starts.");
+          }
+          const style = getReelStyle(input.style);
+          const clipDurations = project.mediaUrls.map(() => style.clipSeconds as number | null);
+          const shotAnalysis = asOverrideArray(project.shotAnalysis, project.mediaUrls.length);
+          const updatedProject = { ...project, clipDurations, reelStyle: input.style };
+          // Clip length is named inside each prompt, so every prompt has to be rebuilt when it
+          // changes -- otherwise a 5-second clip would still be directed as a 10-second one.
+          const generatedPrompts = shotAnalysis.map((analysis, index) =>
+            analysis ? buildCinematicPrompt(index, analysis, updatedProject) : project.generatedPrompts?.[index] ?? null);
+
+          const updated = await updateVideoProject(ctx.user.id, input.id, { reelStyle: input.style, clipDurations, generatedPrompts });
+          if (!updated) throw new Error("The project could not be updated.");
+          return {
+            shots: getShotPlan(updated.mediaUrls, updated.generatedPrompts || []),
+            shotAnalysis: updated.shotAnalysis || [],
+            customCameraMoves: updated.customCameraMoves || [],
+            clipDurations: updated.clipDurations || [],
+            reelStyle: updated.reelStyle,
+            ready: true,
+          };
+        } catch (error) {
+          console.error(`[Projects] setReelStyle failed for project ${input.id}:`, error);
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to change the style." });
         }
       }),
     complete: protectedProcedure
