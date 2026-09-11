@@ -14,6 +14,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
+    // shared/ carries logic both the client and the server depend on (retry, shot presets,
+    // the unsupported-move filter that stands between a customer's typing and a paid render),
+    // so it needs covering too -- a server-only glob silently skipped it.
+    include: ["server/**/*.test.ts", "server/**/*.spec.ts", "shared/**/*.test.ts", "shared/**/*.spec.ts"],
   },
 });

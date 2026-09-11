@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getPilotGallery, pilotGalleryIds } from "../shared/pilotGalleries";
 import { MAX_PROPERTY_PHOTOS, STAGING_STYLES } from "../shared/video";
+import { cameraPresetIds, findUnsupportedMove, getCameraPreset, ROOM_TYPE_CHOICES } from "../shared/shotPresets";
 import { AUTH_UNAVAILABLE_ERR_MSG, COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -478,7 +479,12 @@ export const appRouter = router({
       .input(z.object({
         id: z.number().int().positive(),
         index: z.number().int().nonnegative(),
+        /** A named camera choice. Resolves server-side to a directive proven against the model. */
+        cameraPreset: z.enum(cameraPresetIds).nullable().optional(),
+        /** Free-text camera move, from the advanced control. Validated before it can be used. */
         cameraMove: z.string().trim().max(360).nullable().optional(),
+        /** The customer correcting the room the model detected. */
+        roomType: z.enum(ROOM_TYPE_CHOICES).optional(),
         durationSeconds: z.union([z.literal(5), z.literal(10)]).nullable().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
@@ -494,17 +500,40 @@ export const appRouter = router({
           }
           const customCameraMoves = asOverrideArray(project.customCameraMoves, project.mediaUrls.length);
           const clipDurations = asOverrideArray(project.clipDurations, project.mediaUrls.length);
-          if (input.cameraMove !== undefined) customCameraMoves[input.index] = input.cameraMove || null;
+
+          if (input.cameraPreset !== undefined) {
+            // A named choice wins outright and clears any free text behind it, so the chip the
+            // customer sees selected is always the move that will actually be rendered.
+            customCameraMoves[input.index] = input.cameraPreset ? getCameraPreset(input.cameraPreset)!.directive : null;
+          } else if (input.cameraMove !== undefined) {
+            const cameraMove = input.cameraMove || null;
+            // Refuse a move the render prompt already forbids rather than passing it through to
+            // contradict those rules and spend a credit on a clip that will come back warped.
+            const unsupported = cameraMove ? findUnsupportedMove(cameraMove) : null;
+            if (unsupported) {
+              throw new Error(`This model cannot do "${unsupported}" moves -- they come back warped. Try one of the suggested movements instead.`);
+            }
+            customCameraMoves[input.index] = cameraMove;
+          }
+
           if (input.durationSeconds !== undefined) clipDurations[input.index] = input.durationSeconds;
 
-          const updatedProject = { ...project, customCameraMoves, clipDurations };
-          const shotAnalysis = project.shotAnalysis?.[input.index];
+          // A room correction is written into the persisted analysis, which is what the prompt
+          // builder reads. The customer knows a kitchen from a dining room instantly; the
+          // model does not always, and says so with a low-confidence "unknown".
+          const analysisList = asOverrideArray(project.shotAnalysis, project.mediaUrls.length);
+          if (input.roomType !== undefined && analysisList[input.index]) {
+            analysisList[input.index] = { ...analysisList[input.index]!, shotType: input.roomType };
+          }
+
+          const updatedProject = { ...project, customCameraMoves, clipDurations, shotAnalysis: analysisList };
+          const shotAnalysis = analysisList[input.index];
           const generatedPrompts = project.generatedPrompts ? [...project.generatedPrompts] : [];
           // Rebuild this one photo's prompt immediately from its already-persisted shotAnalysis --
           // no fal.ai call needed, so editing an override is instant and free.
           if (shotAnalysis) generatedPrompts[input.index] = buildCinematicPrompt(input.index, shotAnalysis, updatedProject);
 
-          const updated = await updateVideoProject(ctx.user.id, input.id, { customCameraMoves, clipDurations, generatedPrompts });
+          const updated = await updateVideoProject(ctx.user.id, input.id, { customCameraMoves, clipDurations, shotAnalysis: analysisList, generatedPrompts });
           if (!updated) throw new Error("The project could not be updated.");
           return { shots: getShotPlan(updated.mediaUrls, updated.generatedPrompts || []), shotAnalysis: updated.shotAnalysis || [], customCameraMoves: updated.customCameraMoves || [], clipDurations: updated.clipDurations || [], ready: true };
         } catch (error) {

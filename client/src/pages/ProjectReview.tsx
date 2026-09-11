@@ -5,6 +5,7 @@ import { AppSidebar, StatusPill } from "@/components/AppChrome";
 import { copy, useLocale } from "@/lib/locale";
 import { trpc } from "@/lib/trpc";
 import { FAL_CLIP_SECONDS } from "@shared/video";
+import { CAMERA_PRESETS, matchCameraPreset, ROOM_TYPE_CHOICES } from "@shared/shotPresets";
 
 export default function ProjectReview() {
   const { locale, isRtl } = useLocale();
@@ -41,13 +42,20 @@ export default function ProjectReview() {
     onSuccess: () => utils.projects.get.invalidate({ id }),
   });
   const updateShotOverride = trpc.projects.updateShotOverride.useMutation({
-    onSuccess: () => utils.projects.shotDirections.invalidate({ id }),
+    onSuccess: (_data, variables) => {
+      setShotError(prev => ({ ...prev, [variables.index]: "" }));
+      utils.projects.shotDirections.invalidate({ id });
+    },
+    // Surface a rejected camera move beside the photo it belongs to, not as a page-level toast.
+    onError: (error, variables) => setShotError(prev => ({ ...prev, [variables.index]: error.message })),
   });
 
   // Local drafts for the camera-move textareas: seeded once per photo the first time real
   // AI/override data arrives, then left alone -- otherwise the 2s classification poll would
   // wipe out whatever the user is mid-typing.
   const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [advancedOpen, setAdvancedOpen] = useState<Record<number, boolean>>({});
+  const [shotError, setShotError] = useState<Record<number, string>>({});
   const seededRef = useRef<Set<number>>(new Set());
   useEffect(() => {
     const shotAnalysis = shotDirections.data?.shotAnalysis;
@@ -119,11 +127,14 @@ export default function ProjectReview() {
 
             <div className="mt-7 rounded-2xl border border-[#251811]/8 bg-[#F8F5F3] p-4">
               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.1em] text-[#825E49]"><Sparkles size={14} />{t.review.storyboard}</div>
+              <p className="mt-2 text-[11px] leading-4 text-[#8A7F79]">{t.shot.freeEditsNote}</p>
               <div className="mt-3 space-y-2.5">
                 {data.mediaUrls.map((_, index) => {
                   const hasOverride = !!shotDirections.data?.customCameraMoves?.[index];
                   const analysisReady = !!shotDirections.data?.shotAnalysis?.[index];
                   const activeDuration = shotDirections.data?.clipDurations?.[index] || 10;
+                  const activePreset = matchCameraPreset(shotDirections.data?.customCameraMoves?.[index]);
+                  const activeRoom = shotDirections.data?.shotAnalysis?.[index]?.shotType ?? "unknown";
                   return (
                     <div key={index} className="rounded-xl bg-white p-3">
                       <div className="flex items-center gap-2">
@@ -142,15 +153,59 @@ export default function ProjectReview() {
                           ))}
                         </div>
                       </div>
-                      <textarea
-                        value={drafts[index] ?? ""}
-                        onChange={event => setDrafts(prev => ({ ...prev, [index]: event.target.value }))}
-                        onBlur={() => updateShotOverride.mutate({ id, index, cameraMove: (drafts[index] ?? "").trim() || null })}
-                        disabled={!canReorder || !analysisReady}
-                        placeholder={analysisReady ? t.review.cameraMovePlaceholder : t.review.analyzing}
-                        rows={2}
-                        className="mt-2 w-full resize-none rounded-lg border border-[#251811]/8 bg-[#FAF8F7] p-2 text-xs leading-5 text-[#604E44] outline-none placeholder:text-[#A49E9A] disabled:opacity-60"
-                      />
+                      <div className="mt-3">
+                        <p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#8A7F79]">{t.shot.movementLabel}</p>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {CAMERA_PRESETS.map(preset => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              disabled={!canReorder || !analysisReady || updateShotOverride.isPending}
+                              onClick={() => updateShotOverride.mutate({ id, index, cameraPreset: activePreset === preset.id ? null : preset.id })}
+                              className={`h-7 rounded-full px-2.5 text-[10px] font-bold transition ${activePreset === preset.id ? "bg-[#251811] text-white" : "bg-[#F3EBE7] text-[#795E4E] hover:bg-[#EADFD9]"} disabled:opacity-50`}
+                            >{t.shot.moves[preset.id]}</button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="mt-3">
+                        <label className="text-[10px] font-bold uppercase tracking-[.08em] text-[#8A7F79]" htmlFor={`room-${index}`}>{t.shot.roomLabel}</label>
+                        <select
+                          id={`room-${index}`}
+                          value={activeRoom}
+                          disabled={!canReorder || !analysisReady || updateShotOverride.isPending}
+                          onChange={event => updateShotOverride.mutate({ id, index, roomType: event.target.value as (typeof ROOM_TYPE_CHOICES)[number] })}
+                          className="mt-1.5 h-8 w-full rounded-lg border border-[#251811]/10 bg-[#FAF8F7] px-2 text-xs font-semibold text-[#604E44] outline-none disabled:opacity-60"
+                        >
+                          {ROOM_TYPE_CHOICES.map(room => <option key={room} value={room}>{t.shot.rooms[room]}</option>)}
+                        </select>
+                      </div>
+
+                      {canReorder && (
+                        <button
+                          type="button"
+                          onClick={() => setAdvancedOpen(prev => ({ ...prev, [index]: !prev[index] }))}
+                          className="mt-2.5 text-[10px] font-bold text-[#825E49] underline"
+                        >{t.shot.advanced}</button>
+                      )}
+
+                      {advancedOpen[index] && (
+                        <div className="mt-2">
+                          <textarea
+                            value={drafts[index] ?? ""}
+                            onChange={event => setDrafts(prev => ({ ...prev, [index]: event.target.value }))}
+                            onBlur={() => updateShotOverride.mutate({ id, index, cameraMove: (drafts[index] ?? "").trim() || null })}
+                            disabled={!canReorder || !analysisReady}
+                            placeholder={analysisReady ? t.review.cameraMovePlaceholder : t.review.analyzing}
+                            rows={2}
+                            className="w-full resize-none rounded-lg border border-[#251811]/8 bg-[#FAF8F7] p-2 text-xs leading-5 text-[#604E44] outline-none placeholder:text-[#A49E9A] disabled:opacity-60"
+                          />
+                          <p className="mt-1 text-[10px] leading-4 text-[#8A7F79]">{t.shot.advancedHint}</p>
+                        </div>
+                      )}
+
+                      {shotError[index] && <p className="mt-2 rounded-lg bg-[#FFEFE5] px-2 py-1.5 text-[10px] leading-4 text-[#94522C]">{shotError[index]}</p>}
+
                       {hasOverride && canReorder && (
                         <button
                           type="button"
@@ -159,7 +214,7 @@ export default function ProjectReview() {
                             setDrafts(prev => ({ ...prev, [index]: suggestion }));
                             updateShotOverride.mutate({ id, index, cameraMove: null });
                           }}
-                          className="mt-1.5 text-[10px] font-bold text-[#825E49] underline"
+                          className="mt-1.5 block text-[10px] font-bold text-[#825E49] underline"
                         >{t.review.resetToAi}</button>
                       )}
                     </div>
