@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgEnum, pgTable, serial, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgEnum, pgTable, serial, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 
 /** Core account record populated from Manus OAuth. */
 export const userRole = pgEnum("user_role", ["user", "admin"]);
@@ -12,8 +12,16 @@ export const users = pgTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: userRole("role").default("user").notNull(),
-  videosRemaining: integer("videosRemaining").default(3).notNull(),
+  // Permanent credit. One-time packs plus grandfathered signup credit -- never reset.
+  videosRemaining: integer("videosRemaining").default(0).notNull(),
   stagingCreditsRemaining: integer("stagingCreditsRemaining").default(0).notNull(),
+  // Perishable credit. Reset to the plan allowance at the start of each billing period.
+  // Kept separate from the permanent bucket so a renewal cannot wipe a purchased pack.
+  subscriptionVideosRemaining: integer("subscriptionVideosRemaining").default(0).notNull(),
+  subscriptionStagingRemaining: integer("subscriptionStagingRemaining").default(0).notNull(),
+  paddleCustomerId: varchar("paddleCustomerId", { length: 64 }),
+  billingBlocked: boolean("billingBlocked").default(false).notNull(),
+  trialGrantedAt: timestamp("trialGrantedAt", { withTimezone: true }),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn", { withTimezone: true }).defaultNow().notNull(),
@@ -72,9 +80,76 @@ export const contactMessages = pgTable("contact_messages", {
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("userId").notNull(),
+    paddleSubscriptionId: varchar("paddleSubscriptionId", { length: 64 }).notNull(),
+    paddleCustomerId: varchar("paddleCustomerId", { length: 64 }),
+    planId: varchar("planId", { length: 32 }).notNull(),
+    status: varchar("status", { length: 32 }).notNull(),
+    currentPeriodStart: timestamp("currentPeriodStart", { withTimezone: true }),
+    currentPeriodEnd: timestamp("currentPeriodEnd", { withTimezone: true }),
+    // The billing period we last granted for. This -- not the webhook event id -- is what
+    // makes granting idempotent: one new subscription fires both subscription.activated
+    // and transaction.completed, two distinct events describing the same period, so
+    // per-event dedupe would grant the allowance twice on every signup.
+    lastGrantedPeriodStart: timestamp("lastGrantedPeriodStart", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancelAtPeriodEnd").default(false).notNull(),
+    // Paddle does not guarantee ordering; an out-of-order update is dropped.
+    occurredAt: timestamp("occurredAt", { withTimezone: true }),
+    createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("subscriptions_paddle_id_idx").on(table.paddleSubscriptionId),
+    index("subscriptions_user_idx").on(table.userId),
+  ],
+);
+
+export const billingEvents = pgTable(
+  "billing_events",
+  {
+    id: serial("id").primaryKey(),
+    paddleEventId: varchar("paddleEventId", { length: 64 }).notNull(),
+    eventType: varchar("eventType", { length: 64 }).notNull(),
+    userId: integer("userId"),
+    payload: jsonb("payload"),
+    occurredAt: timestamp("occurredAt", { withTimezone: true }),
+    receivedAt: timestamp("receivedAt", { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("billing_events_event_id_idx").on(table.paddleEventId),
+    index("billing_events_user_idx").on(table.userId),
+  ],
+);
+
+export const creditLedger = pgTable(
+  "credit_ledger",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("userId").notNull(),
+    /** "video" | "staging" */
+    creditType: varchar("creditType", { length: 16 }).notNull(),
+    /** "subscription" | "permanent" */
+    bucket: varchar("bucket", { length: 16 }).notNull(),
+    delta: integer("delta").notNull(),
+    kind: varchar("kind", { length: 32 }).notNull(),
+    reason: text("reason"),
+    refId: varchar("refId", { length: 64 }),
+    createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => [index("credit_ledger_user_idx").on(table.userId), index("credit_ledger_ref_idx").on(table.refId)],
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type VideoProject = typeof videoProjects.$inferSelect;
 export type InsertVideoProject = typeof videoProjects.$inferInsert;
 export type ContactMessage = typeof contactMessages.$inferSelect;
 export type InsertContactMessage = typeof contactMessages.$inferInsert;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type InsertSubscription = typeof subscriptions.$inferInsert;
+export type BillingEvent = typeof billingEvents.$inferSelect;
+export type CreditLedgerRow = typeof creditLedger.$inferSelect;

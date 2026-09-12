@@ -2,15 +2,17 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getPilotGallery, pilotGalleryIds } from "../shared/pilotGalleries";
 import { MAX_PROPERTY_MEDIA_BYTES, MAX_PROPERTY_PHOTOS, STAGING_STYLES } from "../shared/video";
-import { AUTH_UNAVAILABLE_ERR_MSG, COOKIE_NAME } from "@shared/const";
+import { AUTH_UNAVAILABLE_ERR_MSG, COOKIE_NAME, QUOTA_EXHAUSTED_ERR_MSG } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
+import { billingRouter } from "./billing/router";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
   createVideoProject,
   decrementStagingCredits,
   decrementVideoQuota,
   getVideoProject,
+  hasVideoCredit,
   incrementStagingCredits,
   incrementVideoQuota,
   insertContactMessage,
@@ -81,6 +83,7 @@ async function presentRender(snapshot: Awaited<ReturnType<typeof getProjectRende
 
 export const appRouter = router({
   system: systemRouter,
+  billing: billingRouter,
   auth: router({
     me: publicProcedure.query(opts => {
       // Signed in, but we could not read the account. Reporting "signed out"
@@ -158,10 +161,19 @@ export const appRouter = router({
           });
           const created = await getVideoProject(ctx.user.id, id);
           if (created) {
-            try {
-              await submitShotClassification(ctx.user.id, created, ctx.supabaseAccessToken);
-            } catch (error) {
-              console.error(`[Projects] pre-approval classification submission failed for project ${id}:`, error);
+            // Classification queues one paid fal.ai vision call per photo, so it is gated
+            // on the caller actually having credit. The gate sits here rather than on
+            // create() on purpose: an account with no credit can still upload photos and
+            // see its project, it just cannot spend our money generating shot direction.
+            // This is a check, not a spend -- the credit itself is taken at approve.
+            if (await hasVideoCredit(ctx.user.id)) {
+              try {
+                await submitShotClassification(ctx.user.id, created, ctx.supabaseAccessToken);
+              } catch (error) {
+                console.error(`[Projects] pre-approval classification submission failed for project ${id}:`, error);
+              }
+            } else {
+              console.log(`[Projects] skipping classification for project ${id}: no render credit`);
             }
           }
           return { id };
@@ -200,7 +212,8 @@ export const appRouter = router({
           status: "Review",
         });
         const created = await getVideoProject(ctx.user.id, id);
-        if (created) {
+        // Same gate as create(): vision classification is billable, so it needs credit.
+        if (created && (await hasVideoCredit(ctx.user.id))) {
           try {
             await submitShotClassification(ctx.user.id, created, ctx.supabaseAccessToken);
           } catch (error) {
@@ -215,9 +228,9 @@ export const appRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
       try {
         const transition = getApprovalTransition(project.status);
-        const remaining = await decrementVideoQuota(ctx.user.id);
-        if (remaining === null) {
-          throw new Error("You've used all of your included videos. Contact us to add more before rendering another reel.");
+        const spend = await decrementVideoQuota(ctx.user.id);
+        if (spend === null) {
+          throw new TRPCError({ code: "FORBIDDEN", message: QUOTA_EXHAUSTED_ERR_MSG });
         }
         try {
           const render = await submitFalRender(ctx.user.id, project, ctx.supabaseAccessToken);
@@ -233,11 +246,16 @@ export const appRouter = router({
           ]);
           return { project: presentedProject, render: presentedRender };
         } catch (renderError) {
-          await incrementVideoQuota(ctx.user.id).catch(() => {});
+          // Refund into the bucket the credit came out of, so a failed render cannot
+          // quietly convert a perishable plan allowance into a permanent credit.
+          await incrementVideoQuota(ctx.user.id, spend.bucket).catch(() => {});
           throw renderError;
         }
       } catch (error) {
         console.error(`[Projects] approve failed for project ${input.id}:`, error);
+        // Rethrow a TRPCError untouched so its code (e.g. FORBIDDEN for exhausted credit)
+        // survives; only unexpected failures are flattened to BAD_REQUEST.
+        if (error instanceof TRPCError) throw error;
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to start fal.ai rendering." });
       }
     }),
@@ -283,9 +301,9 @@ export const appRouter = router({
           if (input.index >= project.mediaUrls.length) {
             throw new Error("Invalid photo.");
           }
-          const remaining = await decrementStagingCredits(ctx.user.id);
-          if (remaining === null) {
-            throw new Error("You've used all of your staging credits. Contact us to add more.");
+          const spend = await decrementStagingCredits(ctx.user.id);
+          if (spend === null) {
+            throw new TRPCError({ code: "FORBIDDEN", message: QUOTA_EXHAUSTED_ERR_MSG });
           }
           try {
             const staged = await stagePhoto(ctx.user.id, project, input.index, input.style, ctx.supabaseAccessToken);
@@ -299,11 +317,12 @@ export const appRouter = router({
             if (!updated) throw new Error("The project could not be updated.");
             return presentProject(updated, ctx.supabaseAccessToken);
           } catch (stagingError) {
-            await incrementStagingCredits(ctx.user.id).catch(() => {});
+            await incrementStagingCredits(ctx.user.id, spend.bucket).catch(() => {});
             throw stagingError;
           }
         } catch (error) {
           console.error(`[Projects] stagePhoto failed for project ${input.id}, index ${input.index}:`, error);
+          if (error instanceof TRPCError) throw error;
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to stage this photo." });
         }
       }),
