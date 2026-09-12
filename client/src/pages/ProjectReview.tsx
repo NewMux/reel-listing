@@ -1,3 +1,4 @@
+import { QUOTA_EXHAUSTED_ERR_MSG } from "@shared/const";
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Clock3, Loader2, MessageSquareText, Sparkles } from "lucide-react";
 import { useLocation, useRoute } from "wouter";
@@ -15,6 +16,9 @@ export default function ProjectReview() {
   const [notes, setNotes] = useState("");
   const [showNotes, setShowNotes] = useState(false);
   const [approveError, setApproveError] = useState("");
+  // Set when the failure was specifically "out of credit", so the page can offer a way to
+  // buy more rather than leaving the user at a dead end.
+  const [needsCredit, setNeedsCredit] = useState(false);
   const project = trpc.projects.get.useQuery({ id }, { enabled: Number.isSafeInteger(id) });
   const shotDirections = trpc.projects.shotDirections.useQuery(
     { id },
@@ -27,7 +31,12 @@ export default function ProjectReview() {
       utils.projects.list.invalidate();
       setLocation(`/projects/${id}`);
     },
-    onError: err => setApproveError(err.message),
+    onError: err => {
+      // Matched on the shared constant, not on English prose -- the same message is shown
+      // in Arabic, so string-matching the text would silently stop working there.
+      setNeedsCredit(err.message === QUOTA_EXHAUSTED_ERR_MSG);
+      setApproveError(err.message);
+    },
   });
   const request = trpc.projects.requestChanges.useMutation({
     onSuccess: () => {
@@ -165,7 +174,7 @@ export default function ProjectReview() {
             {data.revisionNotes && <div className="mt-5 rounded-xl bg-[#F7EDE7] p-3.5"><p className="text-[11px] font-bold uppercase tracking-[.1em] text-[#885334]">{t.review.changeSent}</p><p className="mt-1 text-sm leading-6 text-[#695347]">{data.revisionNotes}</p></div>}
 
             {data.status === "Review" ? <>
-              {approveError && <p className="mt-5 flex gap-2 rounded-xl bg-[#FFEFE5] px-3 py-2.5 text-xs font-medium leading-5 text-[#94522C]"><AlertCircle size={15} className="shrink-0" />{approveError}</p>}
+              {approveError && <div className="mt-5 rounded-xl bg-[#FFEFE5] px-3 py-2.5"><p className="flex gap-2 text-xs font-medium leading-5 text-[#94522C]"><AlertCircle size={15} className="shrink-0" />{needsCredit ? t.billing.outOfCredit : approveError}</p>{needsCredit && <button onClick={() => setLocation("/billing")} className="mt-2 inline-flex h-9 items-center rounded-lg bg-[#251811] px-4 text-xs font-bold text-white">{t.billing.choosePlan}</button>}</div>}
               <button disabled={approve.isPending} onClick={() => { setApproveError(""); approve.mutate({ id }); }} className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white transition hover:bg-[#402E24] disabled:opacity-70">{approve.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{approve.isPending ? t.review.preparing : t.review.approve}</button>
               <button onClick={() => setShowNotes(!showNotes)} className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#251811]/12 text-sm font-bold text-[#503F35] transition hover:bg-[#F6F2EF]"><MessageSquareText size={16} />{t.review.request}</button>
               {showNotes && <div className="mt-4 rounded-xl border border-[#251811]/10 bg-[#F8F4F1] p-3"><textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder={t.review.notePlace} rows={3} className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-[#A49E9A]" /><button disabled={notes.trim().length < 3 || request.isPending} onClick={() => request.mutate({ id, notes })} className="mt-3 h-9 w-full rounded-lg bg-[#E9C6B2] text-xs font-bold text-[#512E1A] disabled:opacity-50">{request.isPending ? t.common.loading : t.review.send}</button></div>}
