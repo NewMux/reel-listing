@@ -230,3 +230,63 @@ export function nextQuotaState(current: QuotaState, intent: BillingIntent): Quot
       return current;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Normalisation
+// ---------------------------------------------------------------------------
+
+const str = (value: unknown): string | undefined => (typeof value === "string" && value ? value : undefined);
+
+function period(raw: unknown): { startsAt?: string; endsAt?: string } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  return { startsAt: str(obj.starts_at), endsAt: str(obj.ends_at) };
+}
+
+/**
+ * Maps a raw Paddle webhook body (snake_case JSON) onto the fields we actually read.
+ *
+ * We parse the payload ourselves rather than using the SDK's `unmarshal`, which builds
+ * strict entity objects and throws on anything it does not model -- an add-on line with no
+ * unit price, or a field Paddle adds later, is enough to make it reject an event. Refusing
+ * a correctly signed payment because of a field we never look at is not a trade worth
+ * making, so signature checking (which we still delegate to the SDK) is kept separate from
+ * interpretation, which is deliberately tolerant.
+ */
+export function normalizePaddleEvent(raw: unknown): PaddleEventView | null {
+  if (!raw || typeof raw !== "object") return null;
+  const event = raw as Record<string, unknown>;
+
+  const eventId = str(event.event_id);
+  const eventType = str(event.event_type);
+  if (!eventId || !eventType) return null;
+
+  const data = (event.data && typeof event.data === "object" ? event.data : {}) as Record<string, unknown>;
+  const rawItems = Array.isArray(data.items) ? data.items : [];
+
+  const scheduled = data.scheduled_change && typeof data.scheduled_change === "object"
+    ? (data.scheduled_change as Record<string, unknown>)
+    : null;
+
+  return {
+    eventId,
+    eventType,
+    occurredAt: str(event.occurred_at),
+    data: {
+      id: str(data.id),
+      status: str(data.status),
+      customerId: str(data.customer_id) ?? null,
+      subscriptionId: str(data.subscription_id) ?? null,
+      origin: str(data.origin),
+      customData: data.custom_data ?? null,
+      scheduledChange: scheduled ? { action: str(scheduled.action), effectiveAt: str(scheduled.effective_at) } : null,
+      currentBillingPeriod: period(data.current_billing_period),
+      billingPeriod: period(data.billing_period),
+      items: rawItems.map(item => {
+        const entry = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+        const price = (entry.price && typeof entry.price === "object" ? entry.price : {}) as Record<string, unknown>;
+        return { price: { id: str(price.id) }, quantity: typeof entry.quantity === "number" ? entry.quantity : 1 };
+      }),
+    },
+  };
+}

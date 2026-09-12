@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PACK_CATALOG, PLAN_CATALOG, formatBhd, formatUsd } from "@shared/plans";
-import { nextQuotaState, paddleEventToIntent, userIdFromCustomData, type PaddleEventView, type PriceResolver, type QuotaState } from "./intents";
+import { nextQuotaState, normalizePaddleEvent, paddleEventToIntent, userIdFromCustomData, type PaddleEventView, type PriceResolver, type QuotaState } from "./intents";
 
 const PRICE_STARTER = "pri_starter";
 const PRICE_PRO = "pri_pro";
@@ -143,5 +143,78 @@ describe("price formatting", () => {
 
   it("renders whole-dollar prices without trailing zeros", () => {
     expect(formatUsd(8_900)).toBe("$89");
+  });
+});
+
+describe("normalizePaddleEvent", () => {
+  // Shaped like a real Paddle delivery: snake_case, and carrying plenty of fields we
+  // never read. The normalizer must tolerate all of it -- the SDK's strict entity
+  // constructors do not, which is why interpretation is kept separate from verification.
+  const rawTransaction = {
+    event_id: "evt_01j",
+    event_type: "transaction.completed",
+    notification_id: "ntf_01j",
+    occurred_at: "2026-09-12T10:00:00.000Z",
+    data: {
+      id: "txn_01j",
+      status: "completed",
+      customer_id: "ctm_01j",
+      custom_data: { userId: "7" },
+      subscription_id: "sub_01j",
+      origin: "subscription_recurring",
+      currency_code: "USD",
+      billing_period: { starts_at: "2026-10-01T00:00:00Z", ends_at: "2026-11-01T00:00:00Z" },
+      items: [
+        { price: { id: PRICE_PRO, unit_price: { amount: "22900", currency_code: "USD" } }, quantity: 1 },
+        // An add-on with no unit_price at all -- the shape that made the SDK's unmarshal
+        // throw on an otherwise perfectly valid, correctly signed payment.
+        { price: { id: "pri_addon" }, quantity: 2 },
+      ],
+    },
+  };
+
+  it("maps a real-shaped transaction payload onto the fields we read", () => {
+    const event = normalizePaddleEvent(rawTransaction);
+    expect(event).not.toBeNull();
+    expect(event!.eventId).toBe("evt_01j");
+    expect(event!.data?.customerId).toBe("ctm_01j");
+    expect(event!.data?.subscriptionId).toBe("sub_01j");
+    expect(event!.data?.billingPeriod?.startsAt).toBe("2026-10-01T00:00:00Z");
+    expect(userIdFromCustomData(event!.data?.customData)).toBe(7);
+  });
+
+  it("still resolves the intent when a line item is missing fields the SDK requires", () => {
+    const intent = paddleEventToIntent(normalizePaddleEvent(rawTransaction)!, resolve);
+    expect(intent.kind).toBe("grant-period");
+    if (intent.kind !== "grant-period") return;
+    expect(intent.planId).toBe("pro");
+    expect(intent.periodStart).toBe("2026-10-01T00:00:00Z");
+  });
+
+  it("maps a subscription payload's current_billing_period and scheduled_change", () => {
+    const event = normalizePaddleEvent({
+      event_id: "evt_sub",
+      event_type: "subscription.updated",
+      occurred_at: "2026-09-12T10:00:00.000Z",
+      data: {
+        id: "sub_01j",
+        status: "active",
+        customer_id: "ctm_01j",
+        current_billing_period: { starts_at: "2026-09-01T00:00:00Z", ends_at: "2026-10-01T00:00:00Z" },
+        scheduled_change: { action: "cancel", effective_at: "2026-10-01T00:00:00Z" },
+        items: [{ price: { id: PRICE_STARTER }, quantity: 1, status: "active" }],
+      },
+    });
+    const intent = paddleEventToIntent(event!, resolve);
+    expect(intent.kind).toBe("grant-period");
+    if (intent.kind !== "grant-period") return;
+    expect(intent.cancelAtPeriodEnd).toBe(true);
+    expect(intent.periodEnd).toBe("2026-10-01T00:00:00Z");
+  });
+
+  it("rejects a body that is not a Paddle event", () => {
+    expect(normalizePaddleEvent(null)).toBeNull();
+    expect(normalizePaddleEvent({})).toBeNull();
+    expect(normalizePaddleEvent({ event_id: "evt_1" })).toBeNull();
   });
 });

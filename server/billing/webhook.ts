@@ -10,7 +10,7 @@ import express, { type Express, type Request, type Response } from "express";
 import { applyBillingEvent, getUserByEmail, getUserById, getUserByPaddleCustomerId, linkPaddleCustomer, type BillingIntentRecord } from "../db";
 import { getPaddle } from "./paddle";
 import { PADDLE_ENV, isPaddleConfigured, resolvePrice } from "./paddleEnv";
-import { paddleEventToIntent, userIdFromCustomData, type BillingIntent, type PaddleEventView } from "./intents";
+import { normalizePaddleEvent, paddleEventToIntent, userIdFromCustomData, type BillingIntent, type PaddleEventView } from "./intents";
 
 export const PADDLE_WEBHOOK_PATH = "/api/webhooks/paddle";
 
@@ -141,18 +141,32 @@ async function handle(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  // Signature checking is delegated to the SDK; interpretation is not. unmarshal() also
+  // builds strict entity objects and throws on any shape it does not model, which would
+  // turn "a line item we never look at has an unexpected field" into a rejected payment.
+  // Keeping the two apart means only a genuinely bad signature is refused.
+  let signatureValid: boolean;
+  try {
+    signatureValid = await getPaddle().webhooks.isSignatureValid(body, PADDLE_ENV.webhookSecret, signature);
+  } catch (error) {
+    console.warn("[Paddle] signature check errored:", error);
+    signatureValid = false;
+  }
+  if (!signatureValid) {
+    // Not retryable, so 400 rather than 500 -- Paddle stops instead of backing off.
+    res.status(400).send("invalid signature");
+    return;
+  }
+
   let event: PaddleEventView;
   try {
-    const unmarshalled = await getPaddle().webhooks.unmarshal(body, PADDLE_ENV.webhookSecret, signature);
-    if (!unmarshalled) {
-      res.status(400).send("invalid signature");
-      return;
-    }
-    event = unmarshalled as unknown as PaddleEventView;
+    event = normalizePaddleEvent(JSON.parse(body)) as PaddleEventView;
+    if (!event) throw new Error("payload has no event_id/event_type");
   } catch (error) {
-    // A bad signature is not retryable -- 400 so Paddle stops rather than backing off.
-    console.warn("[Paddle] signature verification failed:", error);
-    res.status(400).send("invalid signature");
+    // Signed by Paddle but unreadable by us. That is our bug, not theirs: 500 so the
+    // delivery is retried once we have fixed it, rather than silently dropped.
+    console.error("[Paddle] could not parse a validly signed payload:", error);
+    res.status(500).send("unparseable payload");
     return;
   }
 
