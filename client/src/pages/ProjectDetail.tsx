@@ -43,6 +43,8 @@ export default function ProjectDetail() {
     },
   );
   const createOutputTarget = trpc.media.createUploadTarget.useMutation();
+  const downloadUrlMutation = trpc.projects.downloadUrl.useMutation();
+  const [downloadingClip, setDownloadingClip] = useState<number | "final" | null>(null);
   const complete = trpc.projects.complete.useMutation({
     onSuccess: () => {
       utils.projects.get.invalidate({ id });
@@ -130,7 +132,16 @@ export default function ProjectDetail() {
   const shots = data.mediaUrls.map((sourceUrl, index) => {
     const persisted = renderStatus?.shots[index];
     const state = persisted?.state || (data.status === "Done" ? "complete" : "queued");
-    return { index, sourceUrl, roomType: persisted?.roomType || `${t.project.shotLabel} ${index + 1}`, prompt: persisted?.prompt || "AI direction will appear when generation begins.", state };
+    return {
+      index,
+      sourceUrl,
+      roomType: persisted?.roomType || `${t.project.shotLabel} ${index + 1}`,
+      prompt: persisted?.prompt || "AI direction will appear when generation begins.",
+      state,
+      // True only once the assembly worker has archived this clip to our own storage.
+      // Never inferred from the URL itself -- see the `archived` field on the server.
+      archived: persisted?.archived ?? false,
+    };
   });
 
   const share = async () => {
@@ -143,14 +154,32 @@ export default function ProjectDetail() {
     }
   };
 
+  // Goes through projects.downloadUrl rather than navigating straight to finalVideoUrl:
+  // that mints a signed URL with Content-Disposition: attachment, so the browser actually
+  // saves the file. Navigating to the plain playback URL (the old behavior) just opens the
+  // video in most browsers instead of downloading it.
+  const runDownload = async (target: "final" | number) => {
+    setDownloadingClip(target === "final" ? "final" : target);
+    try {
+      const result = await downloadUrlMutation.mutateAsync(target === "final" ? { id } : { id, clip: target });
+      window.location.href = result.url;
+      if (target === "final") {
+        setDeliveryNotice(t.project.opening);
+        toast.success(t.project.opening);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t.project.downloadFailed);
+    } finally {
+      setDownloadingClip(null);
+    }
+  };
+
   const download = () => {
     if (!canDeliver || !finalVideoUrl) {
       toast.error(t.project.notReadyYet);
       return;
     }
-    setDeliveryNotice(t.project.opening);
-    toast.success(t.project.opening);
-    window.setTimeout(() => { window.location.href = finalVideoUrl; }, 600);
+    void runDownload("final");
   };
 
   const isAssembling = renderStatus?.phase === "assembly" || assemblyProgress !== null;
@@ -186,7 +215,25 @@ export default function ProjectDetail() {
             {canDeliver && <div className="mt-4 rounded-2xl border border-[#D29D7F] bg-[#F8EDE6] px-4 py-3 text-sm font-semibold leading-6 text-[#67412B]"><div className="flex items-center gap-2"><CheckCircle2 size={16} />{t.project.reelReadyBanner}</div></div>}
             {deliveryNotice && <div role="status" className="mt-4 rounded-2xl border border-[#D29D7F] bg-[#F8EDE6] px-4 py-3 text-sm font-semibold leading-6 text-[#67412B]">{deliveryNotice}</div>}
             {data.revisionNotes && <div className="mt-4 rounded-2xl border border-[#E2CABC] bg-[#FFF4ED] p-4"><p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#84614D]">{t.project.requestNotes}</p><p className="mt-2 text-sm leading-6 text-[#6D584C]">{data.revisionNotes}</p></div>}
-            <div className="mt-6 grid gap-2"><button disabled={!canDeliver} onClick={download} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white transition hover:bg-[#402E24] disabled:cursor-not-allowed disabled:bg-[#E9E4E1] disabled:text-[#A09A97]"><Download size={16} />{t.project.download}</button><button onClick={share} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[#251811]/12 text-sm font-bold text-[#503F35] transition hover:bg-[#F6F2EF]"><Share2 size={16} />{t.project.share}</button></div>
+            <div className="mt-6 grid gap-2"><button disabled={!canDeliver || downloadingClip === "final"} onClick={download} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white transition hover:bg-[#402E24] disabled:cursor-not-allowed disabled:bg-[#E9E4E1] disabled:text-[#A09A97]">{downloadingClip === "final" ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}{downloadingClip === "final" ? t.project.downloading : t.project.download}</button><button onClick={share} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[#251811]/12 text-sm font-bold text-[#503F35] transition hover:bg-[#F6F2EF]"><Share2 size={16} />{t.project.share}</button></div>
+            {canDeliver && shots.some(shot => shot.state === "complete" && shot.archived) && (
+              <div className="mt-6 border-t border-[#251811]/8 pt-5">
+                <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#807975]">{t.project.clipsHeading}</p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {shots.filter(shot => shot.archived).map(shot => (
+                    <button
+                      key={shot.index}
+                      disabled={downloadingClip === shot.index}
+                      onClick={() => void runDownload(shot.index)}
+                      className="flex items-center justify-between gap-2 rounded-xl border border-[#251811]/10 px-3 py-2 text-start text-xs font-semibold text-[#503F35] transition hover:bg-[#F6F2EF] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <span className="truncate">{t.project.clipLabel} {shot.index + 1}</span>
+                      {downloadingClip === shot.index ? <Loader2 size={13} className="shrink-0 animate-spin" /> : <Download size={13} className="shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="mt-6 flex items-center gap-2 border-t border-[#251811]/8 pt-5 text-xs text-[#877F7A]"><Link2 size={14} />{t.project.privateLink}<span className="ms-auto text-[10px] font-bold uppercase tracking-[.1em] text-[#AAA4A0]">{data.mediaUrls.length} {t.project.framesLabel}</span></div>
           </aside>
         </div>

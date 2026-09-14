@@ -93,6 +93,21 @@ export function concatManifest(files: string[]): string {
 export const resolveDurations = (count: number, clipDurations: (number | null)[]): number[] =>
   Array.from({ length: count }, (_, index) => clipDurations[index] || FAL_CLIP_SECONDS);
 
+/**
+ * Merges freshly archived clip keys into the project's existing `clipUrls`, at only the
+ * indices that actually archived. An index that failed to persist (or was never attempted)
+ * keeps its original value -- which, on the boundary this app enforces, means it simply
+ * never becomes downloadable client-side (see isStoredKey in server/storage.ts and the
+ * projects.downloadUrl procedure), not that a raw third-party URL leaks anywhere further.
+ * A single failed clip must never take down delivery of the reel itself.
+ */
+export function mergeArchivedClipUrls(
+  original: (string | null)[],
+  archived: (string | null | undefined)[],
+): (string | null)[] {
+  return original.map((value, index) => archived[index] ?? value);
+}
+
 type FfmpegResult = { exitCode: number; logTail: string };
 
 function runFfmpeg(args: string[], cwd: string): Promise<FfmpegResult> {
@@ -154,10 +169,21 @@ async function downloadClip(url: string, destination: string): Promise<void> {
  * Downloads every clip, normalizes them, and joins them into one reel.
  * Returns the finished MP4 as a Buffer. Cleans its scratch directory up either way.
  */
+export type ClipDownloadedHandler = (index: number, filePath: string) => Promise<void> | void;
+
 export async function assembleReel(
   clipUrls: string[],
   clipDurations: (number | null)[],
   onProgress: (progress: AssemblyProgress) => void = () => {},
+  /**
+   * Fired right after each clip is downloaded, before it is re-encoded for stitching -- so
+   * a caller that wants to archive the original (server/assemblyWorker.ts does) gets the
+   * unmodified fal.ai output, not the 720p/24fps/silent version built for crossfading.
+   * Errors are the caller's to handle: assembleReel does not catch them, so a caller that
+   * wants "archiving must never block delivery of the reel" (it does) has to enforce that
+   * itself rather than relying on this function to swallow it silently.
+   */
+  onClipDownloaded?: ClipDownloadedHandler,
 ): Promise<Buffer> {
   if (clipUrls.length === 0 || clipUrls.some(url => !url)) {
     throw new Error("All generated clips must be ready before assembly.");
@@ -175,7 +201,9 @@ export async function assembleReel(
         progress: Math.round((index / clipUrls.length) * 80),
         step: `Preparing clip ${index + 1} of ${clipUrls.length}`,
       });
-      await downloadClip(clipUrls[index], path.join(workDir, source));
+      const sourcePath = path.join(workDir, source);
+      await downloadClip(clipUrls[index], sourcePath);
+      if (onClipDownloaded) await onClipDownloaded(index, sourcePath);
       const result = await runFfmpeg(normalizeArgs(source, output, durations[index]), workDir);
       if (result.exitCode !== 0) {
         throw new Error(`Clip ${index + 1} could not be normalized (ffmpeg ${result.exitCode}). ${result.logTail.slice(-400)}`);

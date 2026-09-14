@@ -149,17 +149,29 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
 // retry budget tight (short timeout, few retries) rather than reusing generous defaults.
 const SIGN_RETRY_OPTIONS = { retries: 1, baseDelayMs: 250, maxDelayMs: 1_000, timeoutMs: 3_000 } as const;
 
-export async function storageGetSignedUrl(relKey: string, accessToken?: string): Promise<string> {
+/**
+ * `download` forces `Content-Disposition: attachment` on the signed URL, so navigating to
+ * it saves a file instead of (as most browsers do for a bare video/octet URL) just playing
+ * it inline. Never set this on a URL that is also used for `<video src>` playback -- the
+ * same header would stop the on-page player from rendering it.
+ */
+export async function storageGetSignedUrl(relKey: string, accessToken?: string, download?: string | true): Promise<string> {
   const key = normalizeKey(relKey);
   if (!hasForgeConfig()) {
     const { data, error } = await withRetry(
-      () => getSupabaseStorageClient(accessToken).storage.from(SUPABASE_BUCKET).createSignedUrl(key, SIGNED_URL_TTL_SECONDS),
+      () =>
+        getSupabaseStorageClient(accessToken)
+          .storage.from(SUPABASE_BUCKET)
+          .createSignedUrl(key, SIGNED_URL_TTL_SECONDS, download ? { download } : undefined),
       { ...SIGN_RETRY_OPTIONS, label: "Supabase Storage signing" },
     );
     if (error || !data?.signedUrl) throw new Error(`Supabase Storage signing failed: ${error?.message || "empty signed URL"}`);
     return data.signedUrl;
   }
 
+  // Forge is the legacy Manus-hosted path, not the target for self-hosted deployments --
+  // a forced-attachment option isn't threaded through to it; it still returns a working
+  // (inline-navigable) URL.
   const forgeUrl = new URL("v1/storage/presign/get", ENV.forgeApiUrl!.replace(/\/+$/, "") + "/");
   forgeUrl.searchParams.set("path", key);
   const { url } = await withRetry(async () => {
@@ -174,9 +186,23 @@ export async function storageGetSignedUrl(relKey: string, accessToken?: string):
   return url;
 }
 
-export async function signStoredUrl(value: string | null | undefined, accessToken?: string | null): Promise<string | null> {
+export async function signStoredUrl(
+  value: string | null | undefined,
+  accessToken?: string | null,
+  download?: string | true,
+): Promise<string | null> {
   if (!value) return null;
   if (!value.startsWith("/manus-storage/")) return value;
   const key = value.slice("/manus-storage/".length);
-  return storageGetSignedUrl(key, accessToken ?? undefined);
+  return storageGetSignedUrl(key, accessToken ?? undefined, download);
 }
+
+/**
+ * True only for a value this app actually stores and controls -- our own `/manus-storage/`
+ * key scheme. Used to gate anything download-related: a clip or video that is still (or
+ * permanently) a raw third-party URL must never be offered as a download, because we
+ * cannot set headers on someone else's host and, more importantly, must not surface that
+ * host to the customer at all.
+ */
+export const isStoredKey = (value: string | null | undefined): value is string =>
+  typeof value === "string" && value.startsWith("/manus-storage/");

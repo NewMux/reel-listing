@@ -11,7 +11,8 @@
  * see `serverAssembly` in the render snapshot.
  */
 
-import { assembleReel, isFfmpegAvailable } from "./assembly";
+import { readFile } from "node:fs/promises";
+import { assembleReel, isFfmpegAvailable, mergeArchivedClipUrls } from "./assembly";
 import { MAX_ASSEMBLY_ATTEMPTS, claimProjectForAssembly, finishAssembly, releaseAssemblyClaim } from "./db";
 import { hasServiceRoleStorage, storagePutAsService } from "./storage";
 
@@ -41,21 +42,47 @@ async function processOne(): Promise<boolean> {
   const attempts = project.assemblyAttempts ?? 1;
   console.log(`[Assembly] project ${project.id}: starting (attempt ${attempts}/${MAX_ASSEMBLY_ATTEMPTS})`);
 
+  // Filled in as each clip archives successfully; an index that fails or is never reached
+  // stays null and mergeArchivedClipUrls() leaves that clip on whatever it already was --
+  // it never becomes a downloadable link client-side (see isStoredKey in server/storage.ts),
+  // but a single archive failure must never fail the reel itself.
+  const archivedClipUrls: (string | null)[] = new Array(clipUrls.length).fill(null);
+  const archiveClip = async (index: number, filePath: string) => {
+    try {
+      const bytes = await readFile(filePath);
+      const key = `property-projects/${project.userId}/outputs/clip-${index + 1}.mp4`;
+      const stored = await storagePutAsService(key, bytes, "video/mp4");
+      archivedClipUrls[index] = stored.url;
+    } catch (error) {
+      console.warn(`[Assembly] project ${project.id}: could not archive clip ${index + 1} for download -`, error);
+    }
+  };
+
   try {
     if (clipUrls.length !== project.mediaUrls.length) {
       throw new Error("Not every clip finished rendering, so the reel cannot be assembled.");
     }
 
-    const video = await assembleReel(clipUrls, project.clipDurations ?? [], progress => {
-      if (progress.progress % 20 === 0) console.log(`[Assembly] project ${project.id}: ${progress.step}`);
-    });
+    const video = await assembleReel(
+      clipUrls,
+      project.clipDurations ?? [],
+      progress => {
+        if (progress.progress % 20 === 0) console.log(`[Assembly] project ${project.id}: ${progress.step}`);
+      },
+      archiveClip,
+    );
 
     // Same key layout the browser upload used, so the ownership prefix checks elsewhere
     // (projects.complete, the storage RLS policies) still hold.
     const key = `property-projects/${project.userId}/outputs/${Date.now()}-${safeFileName(project.title)}.mp4`;
     const stored = await storagePutAsService(key, video, "video/mp4");
-    await finishAssembly(project.id, stored.url);
-    console.log(`[Assembly] project ${project.id}: delivered (${(video.length / 1_000_000).toFixed(1)} MB)`);
+    const mergedClipUrls = mergeArchivedClipUrls(project.clipUrls ?? [], archivedClipUrls);
+    await finishAssembly(project.id, stored.url, mergedClipUrls);
+    const archivedCount = archivedClipUrls.filter(Boolean).length;
+    console.log(
+      `[Assembly] project ${project.id}: delivered (${(video.length / 1_000_000).toFixed(1)} MB, ` +
+        `${archivedCount}/${clipUrls.length} clips archived for individual download)`,
+    );
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Final assembly failed.";

@@ -1,4 +1,5 @@
 import { isServerAssemblyEnabled } from "./assemblyWorker";
+import { isStoredKey } from "./storage";
 import type { VideoProject } from "../drizzle/schema";
 import { FAL_CLIP_SECONDS } from "../shared/video";
 
@@ -14,6 +15,13 @@ export type Shot = {
   prompt: string;
   state: ShotState;
   clipUrl: string | null;
+  /**
+   * True once the assembly worker has archived this clip to our own storage. Computed here,
+   * on the raw pre-signed URL, because after signing (server/routers.ts's presentRender) an
+   * archived clip and a still-on-fal.ai one both look like an opaque https URL -- this is
+   * the only thing that tells the client "this clip has a working download button."
+   */
+  archived: boolean;
 };
 
 export type RenderStatusSnapshot = {
@@ -96,6 +104,7 @@ function makeShots(
           ? "rendering"
           : "queued",
     clipUrl: clipUrls[shot.index] || null,
+    archived: isStoredKey(clipUrls[shot.index]),
   }));
 }
 

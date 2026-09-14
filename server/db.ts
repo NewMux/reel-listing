@@ -585,7 +585,11 @@ export async function claimProjectForAssembly() {
 }
 
 /** Marks a project delivered. Mirrors what projects.complete did from the browser. */
-export async function finishAssembly(projectId: number, finalVideoUrl: string): Promise<void> {
+export async function finishAssembly(
+  projectId: number,
+  finalVideoUrl: string,
+  clipUrls?: (string | null)[],
+): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Project storage is temporarily unavailable.");
   await db
@@ -593,6 +597,9 @@ export async function finishAssembly(projectId: number, finalVideoUrl: string): 
     .set({
       status: "Done",
       finalVideoUrl,
+      // Callers pass the already-merged array (server/assembly.ts's mergeArchivedClipUrls)
+      // -- omit entirely when there is nothing to update, rather than writing an empty one.
+      ...(clipUrls ? { clipUrls } : {}),
       renderPhase: "complete",
       renderProgress: 100,
       renderError: null,

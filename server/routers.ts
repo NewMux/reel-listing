@@ -27,7 +27,7 @@ import {
   getCompletionTransition,
   validateUploadedPropertyMedia,
 } from "./projects";
-import { signStoredUrl, storageCreatePutTarget, storageGetSignedUrl } from "./storage";
+import { isStoredKey, signStoredUrl, storageCreatePutTarget, storageGetSignedUrl } from "./storage";
 import { appendUploadChunk, createUploadSession, finalizeUploadSession } from "./uploadSessions";
 import { getProjectRenderStatus, getShotPlan } from "./renderPipeline";
 import { buildCinematicPrompt, refreshFalRender, refreshShotClassification, submitFalRender, submitShotClassification } from "./falPipeline";
@@ -38,6 +38,12 @@ const fileSchema = z.object({
   key: z.string().min(1).max(600),
   url: z.string().min(1).max(900),
 });
+
+/** A filename safe to put in a Content-Disposition header -- no quotes, no newlines. */
+function safeDownloadName(title: string | null | undefined): string {
+  const cleaned = (title ?? "").trim().replace(/[\r\n"]/g, "").slice(0, 100);
+  return cleaned || "reel-listing-film";
+}
 
 function projectIdInput(id: number) {
   if (!Number.isSafeInteger(id) || id < 1) {
@@ -74,10 +80,25 @@ async function presentProject(project: NonNullable<Awaited<ReturnType<typeof get
 async function presentRender(snapshot: Awaited<ReturnType<typeof getProjectRenderStatus>>, project: NonNullable<Awaited<ReturnType<typeof getVideoProject>>>, accessToken: string | null, sourceUrls?: string[]) {
   if (!project) return snapshot;
   const resolvedSourceUrls = sourceUrls ?? await presentSourceUrls(project, accessToken);
+  // clipUrls that were archived to our own storage (server/assemblyWorker.ts) need signing,
+  // same as finalVideoUrl. signStoredUrl is a no-op for anything not one of our own
+  // /manus-storage/ keys, so a clip that is still (or permanently) a raw fal.ai URL passes
+  // through unchanged here -- it just never satisfies isStoredKey, so the client-side
+  // download control for it never renders. That boundary, not this function, is what keeps
+  // the vendor out of anything a customer can click.
+  const signedClipUrls = await Promise.all(snapshot.clipUrls.map(url => signStoredUrl(url, accessToken)));
   return {
     ...snapshot,
     finalVideoUrl: await signStoredUrl(snapshot.finalVideoUrl, accessToken),
-    shots: snapshot.shots.map((shot, index) => ({ ...shot, sourceUrl: resolvedSourceUrls[index] || shot.sourceUrl })),
+    clipUrls: signedClipUrls,
+    shots: snapshot.shots.map((shot, index) => ({
+      ...shot,
+      sourceUrl: resolvedSourceUrls[index] || shot.sourceUrl,
+      clipUrl: signedClipUrls[index] ?? shot.clipUrl,
+      // shot.archived is already computed correctly (server/renderPipeline.ts's makeShots,
+      // against the pre-signed URL) and carried through by the spread above -- nothing to
+      // do here.
+    })),
   };
 }
 
@@ -354,6 +375,36 @@ export const appRouter = router({
           }
         }
         return presentRender(getProjectRenderStatus(project), project, ctx.supabaseAccessToken);
+      }),
+    /**
+     * A signed, save-as URL for the final video or one clip -- separate from the plain
+     * signed URLs project.get/renderStatus hand back for inline playback, because forcing
+     * Content-Disposition: attachment on that same URL would stop the on-page <video>
+     * player from rendering it.
+     *
+     * Hard boundary: this only ever returns a URL for something isStoredKey() confirms is
+     * our own storage. A clip that never archived (still, internally, a raw fal.ai URL) is
+     * "not ready" here, full stop -- never a fallback to the vendor's link. That boundary
+     * is what keeps fal.ai out of anything a customer can click or see in dev tools for
+     * this feature, regardless of what the render pipeline carries internally.
+     */
+    downloadUrl: protectedProcedure
+      .input(z.object({ id: z.number().int().positive(), clip: z.number().int().nonnegative().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        projectIdInput(input.id);
+        const project = await getVideoProject(ctx.user.id, input.id);
+        if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+
+        const target = input.clip === undefined ? project.finalVideoUrl : (project.clipUrls?.[input.clip] ?? null);
+        if (!isStoredKey(target)) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This video is not ready to download yet." });
+        }
+
+        const baseName = safeDownloadName(project.title);
+        const filename = input.clip === undefined ? `${baseName}.mp4` : `${baseName}-clip-${input.clip + 1}.mp4`;
+        const url = await signStoredUrl(target, ctx.supabaseAccessToken, filename);
+        if (!url) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Could not prepare this download." });
+        return { url };
       }),
     shotDirections: protectedProcedure
       .input(z.object({ id: z.number().int().positive() }))

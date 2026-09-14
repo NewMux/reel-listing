@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blendArgs, buildCrossfadeFilter, concatManifest, normalizeArgs, resolveDurations, TRANSITION_SECONDS } from "./assembly";
+import { blendArgs, buildCrossfadeFilter, concatManifest, mergeArchivedClipUrls, normalizeArgs, resolveDurations, TRANSITION_SECONDS } from "./assembly";
 
 describe("buildCrossfadeFilter", () => {
   it("offsets each transition by the running length of what has already been merged", () => {
@@ -60,5 +60,38 @@ describe("transition length", () => {
   it("matches the browser implementation it replaced", () => {
     // Output must be identical whichever path assembled it.
     expect(TRANSITION_SECONDS).toBe(0.6);
+  });
+});
+
+describe("mergeArchivedClipUrls", () => {
+  it("replaces only the indices that archived successfully", () => {
+    const original = ["fal://a", "fal://b", "fal://c"];
+    const archived = [null, "/manus-storage/property-projects/1/outputs/clip-2.mp4", null];
+    expect(mergeArchivedClipUrls(original, archived)).toEqual([
+      "fal://a",
+      "/manus-storage/property-projects/1/outputs/clip-2.mp4",
+      "fal://c",
+    ]);
+  });
+
+  it("keeps every original value when nothing archived, e.g. a total archive failure", () => {
+    const original = ["fal://a", "fal://b"];
+    expect(mergeArchivedClipUrls(original, [null, null])).toEqual(original);
+    expect(mergeArchivedClipUrls(original, [undefined, undefined])).toEqual(original);
+  });
+
+  it("replaces every index when the whole archive pass succeeds", () => {
+    const original = ["fal://a", "fal://b"];
+    const archived = ["/manus-storage/a.mp4", "/manus-storage/b.mp4"];
+    expect(mergeArchivedClipUrls(original, archived)).toEqual(archived);
+  });
+
+  it("tolerates an archived array shorter than the original -- a clip index never reached", () => {
+    const original = ["fal://a", "fal://b", "fal://c"];
+    expect(mergeArchivedClipUrls(original, ["/manus-storage/a.mp4"])).toEqual([
+      "/manus-storage/a.mp4",
+      "fal://b",
+      "fal://c",
+    ]);
   });
 });
