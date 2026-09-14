@@ -1,7 +1,7 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { and, desc, eq, gt, sql } from "drizzle-orm";
-import { billingEvents, contactMessages, creditLedger, InsertContactMessage, InsertUser, InsertVideoProject, subscriptions, users, videoProjects } from "../drizzle/schema";
+import { billingEvents, contactMessages, creditLedger, InsertContactMessage, InsertUser, InsertVideoProject, subscriptions, users, videoProjects, type VideoProject } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -542,4 +542,90 @@ export async function listRecentBillingEvents(limit = 50) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(billingEvents).orderBy(desc(billingEvents.receivedAt)).limit(limit);
+}
+
+// ---------------------------------------------------------------------------
+// Server-side assembly
+// ---------------------------------------------------------------------------
+
+/** Give up after this many attempts and surface a real error rather than retrying forever. */
+export const MAX_ASSEMBLY_ATTEMPTS = 3;
+/** A claim older than this means the worker process died mid-stitch; take it back. */
+const ASSEMBLY_STALE_MINUTES = 20;
+
+/**
+ * Atomically claims one project that is ready for final assembly.
+ *
+ * `FOR UPDATE SKIP LOCKED` means two workers never pick up the same project, so this stays
+ * correct if the deployment ever runs more than one container. A stale `assemblyStartedAt`
+ * is reclaimed, which is what makes a crash mid-stitch recoverable instead of terminal.
+ */
+export async function claimProjectForAssembly() {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.execute(sql`
+    update "video_projects" set
+      "assemblyStartedAt" = now(),
+      "assemblyAttempts" = "assemblyAttempts" + 1,
+      "updatedAt" = now()
+    where "id" = (
+      select "id" from "video_projects"
+      where "status" = 'Processing'
+        and "renderPhase" = 'assembly'
+        and "assemblyAttempts" < ${MAX_ASSEMBLY_ATTEMPTS}
+        and ("assemblyStartedAt" is null
+             or "assemblyStartedAt" < now() - interval '${sql.raw(String(ASSEMBLY_STALE_MINUTES))} minutes')
+      order by "updatedAt" asc
+      limit 1
+      for update skip locked
+    )
+    returning *
+  `);
+  return (rows as unknown as VideoProject[])[0];
+}
+
+/** Marks a project delivered. Mirrors what projects.complete did from the browser. */
+export async function finishAssembly(projectId: number, finalVideoUrl: string): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Project storage is temporarily unavailable.");
+  await db
+    .update(videoProjects)
+    .set({
+      status: "Done",
+      finalVideoUrl,
+      renderPhase: "complete",
+      renderProgress: 100,
+      renderError: null,
+      assemblyStartedAt: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(videoProjects.id, projectId));
+}
+
+/**
+ * Records a failed assembly attempt.
+ *
+ * Deliberately leaves `assemblyStartedAt` set: the stale-claim window is what spaces the
+ * retries out. Clearing it here would make the project immediately claimable again, and
+ * since the worker drains its queue in a loop, a transient failure (a clip download
+ * blipping) would burn the whole attempt budget within seconds instead of giving the
+ * transient cause time to clear.
+ *
+ * Once the budget is spent the project is marked failed, so the customer sees a real error
+ * rather than a spinner that never resolves.
+ */
+export async function releaseAssemblyClaim(projectId: number, attempts: number, message: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const exhausted = attempts >= MAX_ASSEMBLY_ATTEMPTS;
+  await db
+    .update(videoProjects)
+    .set({
+      // Cleared only when we are done retrying, so the row does not look perpetually claimed.
+      assemblyStartedAt: exhausted ? null : undefined,
+      renderPhase: exhausted ? "failed" : "assembly",
+      renderError: message.slice(0, 1000),
+      updatedAt: new Date(),
+    })
+    .where(eq(videoProjects.id, projectId));
 }

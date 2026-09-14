@@ -54,6 +54,9 @@ export default function ProjectDetail() {
   const assembleFinalReel = async () => {
     const clipUrls = render.data?.clipUrls;
     if (assemblyRef.current || !clipUrls?.length || clipUrls.some(url => !url) || render.data?.phase !== "assembly") return;
+    // On a deployment that assembles server-side, the worker owns this. Stitching here too
+    // would burn the customer's CPU to produce a second copy and race it to projects.complete.
+    if (render.data?.serverAssembly) return;
     assemblyRef.current = true;
     setRenderError(null);
     setDeliveryNotice(null);
@@ -82,9 +85,19 @@ export default function ProjectDetail() {
     }
   };
 
+  // The worker can finish while this page is open. projects.get is not polled, so without
+  // this the page would keep polling renderStatus against a project it still believes is
+  // Processing, and the dashboard would show a stale status.
   useEffect(() => {
+    if (render.data?.status !== "Done" || project.data?.status === "Done") return;
+    utils.projects.get.invalidate({ id });
+    utils.projects.list.invalidate();
+  }, [render.data?.status, project.data?.status, id, utils]);
+
+  useEffect(() => {
+    if (render.data?.serverAssembly) return;
     if (render.data?.phase === "assembly" && !localFinalVideoUrl && !assemblyRef.current) void assembleFinalReel();
-  }, [render.data?.phase, render.data?.completedShots, localFinalVideoUrl]);
+  }, [render.data?.phase, render.data?.serverAssembly, render.data?.completedShots, localFinalVideoUrl]);
 
   // A single "failed" poll is often just a transient hiccup that self-heals on the next
   // poll (a fal.ai shot can be retried by simply polling again). Require it to persist

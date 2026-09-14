@@ -44,6 +44,11 @@ RUN pnpm build
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 RUN corepack enable
+# ffmpeg assembles the final reel server-side. Without it the worker refuses to start and
+# delivery falls back to the customer's browser, which loses the video if they close the tab.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production PORT=3000
 
 COPY package.json pnpm-lock.yaml ./

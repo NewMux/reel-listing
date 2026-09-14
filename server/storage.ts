@@ -26,6 +26,48 @@ function getSupabaseStorageClient(accessToken?: string) {
   });
 }
 
+/**
+ * A storage client for trusted background work that has no user session.
+ *
+ * Bucket access is governed by RLS keyed on the caller's JWT, so the assembly worker --
+ * which runs long after the request that queued it has ended -- cannot use the anon key.
+ * The service-role key bypasses RLS, which is exactly why it must never leave the server
+ * and why callers pass an explicit userId-scoped key rather than a caller-supplied path.
+ */
+function getSupabaseServiceClient() {
+  if (!ENV.supabaseUrl || !ENV.supabaseServiceRoleKey) {
+    throw new Error("Storage config missing: SUPABASE_SERVICE_ROLE_KEY is required for background uploads.");
+  }
+  return createClient(ENV.supabaseUrl, ENV.supabaseServiceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+export const hasServiceRoleStorage = (): boolean => Boolean(ENV.supabaseUrl && ENV.supabaseServiceRoleKey) || hasForgeConfig();
+
+/**
+ * Uploads on behalf of a user from background work. Same key layout as storagePut, so the
+ * ownership prefix checks elsewhere still hold.
+ */
+export async function storagePutAsService(
+  relKey: string,
+  data: StorageData,
+  contentType = "application/octet-stream",
+): Promise<{ key: string; url: string }> {
+  if (hasForgeConfig()) {
+    // Forge is authenticated by its own API key, so it needs no user token either.
+    return storagePut(relKey, data, contentType);
+  }
+  const key = appendHashSuffix(normalizeKey(relKey));
+  const body = typeof data === "string" ? data : new Uint8Array(data);
+  const { error } = await withRetry(
+    () => getSupabaseServiceClient().storage.from(SUPABASE_BUCKET).upload(key, body, { contentType, upsert: false }),
+    { label: "Supabase Storage service upload" },
+  );
+  if (error) throw new Error(`Supabase Storage service upload failed: ${error.message}`);
+  return { key, url: `/manus-storage/${key}` };
+}
+
 function normalizeKey(relKey: string): string {
   return relKey.replace(/^\/+/, "");
 }

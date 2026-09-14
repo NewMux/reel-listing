@@ -124,6 +124,9 @@ See `.env.example` for the annotated list. The ones that will bite you:
   then never advance.
 - **`DATABASE_URL`** — the self-hosted Postgres.
 - **`FAL_KEY`**, **`SUPABASE_URL`**, **`SUPABASE_ANON_KEY`**.
+- **`SUPABASE_SERVICE_ROLE_KEY`** — required for server-side reel assembly. Without it the
+  worker refuses to start and delivery silently falls back to browser stitching, which
+  loses the video if the customer closes the tab.
 - **Paddle**: `PADDLE_ENVIRONMENT`, `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`, and one
   `PADDLE_PRICE_*` per plan and pack.
 
@@ -178,18 +181,46 @@ Then, in the browser:
 4. Create a project, upload photos, approve. The balance drops by one and
    `credit_ledger` shows both the grant and the spend.
 5. Let a render finish — this is what proves `PUBLIC_URL` is right.
+6. **Close the tab right after approving**, then reopen the project a few minutes later.
+   The reel should be there. That is the whole point of the assembly worker, and it is the
+   one behaviour worth checking by hand before you charge anyone.
 
 ---
+
+## Final assembly
+
+The finished reel is stitched server-side by a worker inside the app container (native
+ffmpeg, installed by the Dockerfile). It claims projects whose clips have all rendered,
+joins them with the same 0.6s crossfade the browser used, uploads the MP4, and marks the
+project Done — so a customer who closes their laptop still gets their video.
+
+Two requirements, both of which the worker checks at boot and logs loudly about:
+
+- `ffmpeg` on PATH (the image installs it; override with `FFMPEG_PATH`)
+- `SUPABASE_SERVICE_ROLE_KEY` set
+
+If either is missing the worker declines to start and the render snapshot reports
+`serverAssembly: false`, at which point the browser fallback takes over — the old
+tab-must-stay-open behaviour. That fallback is deliberately kept so the Vercel rollback
+target still delivers video; it is not the intended path here.
+
+A claim is reclaimed after 20 minutes, so a container restart mid-stitch retries rather
+than stranding the project. After 3 failed attempts the project is marked failed with the
+ffmpeg error attached, instead of spinning forever.
+
+To confirm it is live after deploying, look for `[Assembly] worker started` in the
+container logs.
 
 ## Known constraints
 
 - **One container.** `server/uploadSessions.ts` keeps upload chunks in a module-level Map,
   and rate limiting falls back to an in-process window. Both are correct for a single
-  replica and wrong behind two without sticky sessions.
-- **Renders advance only while a browser tab polls**, or when a fal.ai webhook lands. Close
-  the tab before assembly and the clips finish on fal.ai but nothing stitches them. The
-  long-running host removes the 10s ceiling that forced this design, so moving assembly
-  server-side with native ffmpeg is now possible — it is not done here.
+  replica and wrong behind two without sticky sessions. (The assembly worker itself is
+  safe to run in several containers — it claims work with `FOR UPDATE SKIP LOCKED`.)
+- **Clip generation** still advances on the fal.ai webhook or a client poll. Assembly no
+  longer depends on the browser, but if no webhook arrives and nobody has the page open,
+  the clips may sit finished-but-unnoticed until someone looks. Make sure `PUBLIC_URL` is
+  correct so fal.ai can reach `/api/webhooks/fal`.
 - **Annual plans are not sold.** Entitlements are granted by webhook with no scheduler, so
   an annual price would either dump twelve periods of credit on day one or never reset.
   Selling annual needs a periodic top-up path first.

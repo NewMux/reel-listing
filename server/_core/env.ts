@@ -10,6 +10,10 @@ export const ENV = {
   falKey: process.env.FAL_KEY ?? "",
   supabaseUrl: process.env.SUPABASE_URL ?? "",
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? "",
+  // Needed by background work that has no user session -- the assembly worker uploads the
+  // finished reel long after the request that started it has gone. Storage is governed by
+  // RLS keyed on the caller's JWT, so a worker cannot use the anon key.
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   // The stable production domain, used to build callback URLs (e.g. fal.ai webhooks) that
   // must keep working across redeploys -- deliberately not derived from Vercel's per-deployment URL.
   publicUrl: process.env.PUBLIC_URL ?? "https://reel-listing.com",

@@ -15,6 +15,7 @@ import { createServer } from "http";
 import { createApiApp } from "./api";
 import { serveStatic } from "./static";
 import { assertPaddleEnvConsistent } from "../billing/paddleEnv";
+import { startAssemblyWorker } from "../assemblyWorker";
 
 const port = Number.parseInt(process.env.PORT || "3000", 10);
 
@@ -31,6 +32,8 @@ const server = createServer(app);
 // unexplained failing health check.
 server.listen(port, () => {
   console.log(`[Server] listening on :${port}`);
+  // Delivery must not depend on the customer keeping a browser tab open.
+  void startAssemblyWorker();
 });
 
 const shutdown = (signal: string) => () => {

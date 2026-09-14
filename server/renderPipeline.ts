@@ -1,3 +1,4 @@
+import { isServerAssemblyEnabled } from "./assemblyWorker";
 import type { VideoProject } from "../drizzle/schema";
 import { FAL_CLIP_SECONDS } from "../shared/video";
 
@@ -19,6 +20,12 @@ export type RenderStatusSnapshot = {
   jobId: string | null;
   status: "Review" | "Processing" | "Done";
   phase: "review" | "generating" | "assembly" | "complete" | "failed";
+  /**
+   * True when this deployment assembles the final reel server-side. The client only falls
+   * back to browser stitching when it is false (a serverless deployment, or a host with no
+   * ffmpeg), so the two never race to produce and upload the same video.
+   */
+  serverAssembly: boolean;
   currentStep: string;
   overallProgress: number;
   completedPrompts: number;
@@ -152,6 +159,7 @@ export function buildRenderSnapshot(input: {
     jobId: null,
     status: normalizedStatus,
     phase,
+    serverAssembly: isServerAssemblyEnabled(),
     currentStep,
     overallProgress,
     completedPrompts,

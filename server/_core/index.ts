@@ -2,6 +2,7 @@ import { createServer, type Server } from "http";
 import net from "net";
 import { createApiApp } from "./api";
 import { serveStatic } from "./static";
+import { startAssemblyWorker } from "../assemblyWorker";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -47,6 +48,7 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    void startAssemblyWorker();
   });
 }
 

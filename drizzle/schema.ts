@@ -62,6 +62,10 @@ export const videoProjects = pgTable(
     renderProgress: integer("renderProgress").default(0).notNull(),
     renderPhase: renderPhase("renderPhase").default("idle").notNull(),
     renderError: text("renderError"),
+    // Claim marker for the server-side assembly worker. Set when a worker picks the
+    // project up; a stale value means the process died mid-stitch and it can be retried.
+    assemblyStartedAt: timestamp("assemblyStartedAt", { withTimezone: true }),
+    assemblyAttempts: integer("assemblyAttempts").default(0).notNull(),
     createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -69,6 +73,7 @@ export const videoProjects = pgTable(
     index("video_projects_user_idx").on(table.userId),
     index("video_projects_prompt_request_ids_gin_idx").using("gin", table.promptRequestIds),
     index("video_projects_fal_request_ids_gin_idx").using("gin", table.falRequestIds),
+    index("video_projects_assembly_claim_idx").on(table.status, table.renderPhase, table.assemblyStartedAt),
   ],
 );
 
