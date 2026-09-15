@@ -5,7 +5,6 @@ const planSchema = z.object({
   priceId: z.string().min(1),
   planName: z.string().min(1),
   videoQuota: z.number().int().nonnegative(),
-  stagingCreditQuota: z.number().int().nonnegative(),
   displayPrice: z.string().min(1),
 });
 
@@ -13,7 +12,6 @@ const topupSchema = z.object({
   priceId: z.string().min(1),
   name: z.string().min(1),
   videoCredits: z.number().int().nonnegative(),
-  stagingCredits: z.number().int().nonnegative(),
   displayPrice: z.string().min(1),
 });
 

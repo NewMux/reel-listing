@@ -49,7 +49,6 @@ export default function Pricing() {
                 <div className="my-6 h-px bg-[#251811]/9" />
                 <ul className="space-y-3">
                   <li className="flex gap-2 text-sm text-[#51453E]"><Check size={16} className="mt-0.5 shrink-0 text-[#8C5738]" />{plan.videoQuota} {t.pricing.videosPerMonth}</li>
-                  {plan.stagingCreditQuota > 0 && <li className="flex gap-2 text-sm text-[#51453E]"><Check size={16} className="mt-0.5 shrink-0 text-[#8C5738]" />{plan.stagingCreditQuota} {t.pricing.stagingPerMonth}</li>}
                 </ul>
                 <button onClick={() => choose(plan.priceId)} className="mt-7 h-11 w-full rounded-xl bg-[#F0EAE6] text-sm font-bold text-[#322219] hover:bg-[#E8D6CC]">{t.pricing.choose}</button>
               </article>

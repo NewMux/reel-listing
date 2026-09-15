@@ -14,7 +14,6 @@ export const users = pgTable("users", {
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: userRole("role").default("user").notNull(),
   videosRemaining: integer("videosRemaining").default(3).notNull(),
-  stagingCreditsRemaining: integer("stagingCreditsRemaining").default(0).notNull(),
   // Set once a user's first Paddle checkout completes; null means they've never subscribed/purchased.
   paddleCustomerId: varchar("paddleCustomerId", { length: 64 }).unique(),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),

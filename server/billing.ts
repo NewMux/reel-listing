@@ -1,5 +1,5 @@
 import type { EventEntity } from "@paddle/paddle-node-sdk";
-import { claimWebhookEvent, getUserById, incrementStagingCredits, incrementVideoQuota, releaseWebhookEvent, setPaddleCustomerId, setUserQuota, upsertSubscription } from "./db";
+import { claimWebhookEvent, getUserById, incrementVideoQuota, releaseWebhookEvent, setPaddleCustomerId, setUserQuota, upsertSubscription } from "./db";
 import { findPlanByPriceId, findTopupByPriceId } from "./billingPlans";
 
 function userIdFromCustomData(customData: Record<string, unknown> | null): number | null {
@@ -51,13 +51,12 @@ async function grantFromTransaction(data: { items: Array<{ price: { id: string }
     if (!priceId) continue;
     const plan = findPlanByPriceId(priceId);
     if (plan) {
-      await setUserQuota(userId, { videosRemaining: plan.videoQuota, stagingCreditsRemaining: plan.stagingCreditQuota });
+      await setUserQuota(userId, { videosRemaining: plan.videoQuota });
       continue;
     }
     const topup = findTopupByPriceId(priceId);
-    if (topup) {
-      if (topup.videoCredits > 0) await incrementVideoQuota(userId, topup.videoCredits);
-      if (topup.stagingCredits > 0) await incrementStagingCredits(userId, topup.stagingCredits);
+    if (topup && topup.videoCredits > 0) {
+      await incrementVideoQuota(userId, topup.videoCredits);
     }
   }
 }

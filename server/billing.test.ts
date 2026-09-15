@@ -9,12 +9,11 @@ const db = vi.hoisted(() => ({
   upsertSubscription: vi.fn(async () => undefined),
   setUserQuota: vi.fn(async () => undefined),
   incrementVideoQuota: vi.fn(async () => undefined),
-  incrementStagingCredits: vi.fn(async () => undefined),
 }));
 
 const plans = vi.hoisted(() => ({
-  findPlanByPriceId: vi.fn((priceId: string) => (priceId === "pri_plan" ? { priceId: "pri_plan", planName: "Starter", videoQuota: 3, stagingCreditQuota: 5, displayPrice: "$1" } : undefined)),
-  findTopupByPriceId: vi.fn((priceId: string) => (priceId === "pri_topup" ? { priceId: "pri_topup", name: "Extra", videoCredits: 5, stagingCredits: 2, displayPrice: "$1" } : undefined)),
+  findPlanByPriceId: vi.fn((priceId: string) => (priceId === "pri_plan" ? { priceId: "pri_plan", planName: "Starter", videoQuota: 3, displayPrice: "$1" } : undefined)),
+  findTopupByPriceId: vi.fn((priceId: string) => (priceId === "pri_topup" ? { priceId: "pri_topup", name: "Extra", videoCredits: 5, displayPrice: "$1" } : undefined)),
 }));
 
 vi.mock("./db", () => db);
@@ -44,7 +43,7 @@ describe("handlePaddleEvent", () => {
   it("sets quota to the plan's amount on transaction.completed for a plan price", async () => {
     const event = fakeEvent("transaction.completed", { items: [{ price: { id: "pri_plan" } }], customData: { userId: 42 } });
     await handlePaddleEvent(event);
-    expect(db.setUserQuota).toHaveBeenCalledWith(42, { videosRemaining: 3, stagingCreditsRemaining: 5 });
+    expect(db.setUserQuota).toHaveBeenCalledWith(42, { videosRemaining: 3 });
     expect(db.incrementVideoQuota).not.toHaveBeenCalled();
   });
 
@@ -52,7 +51,6 @@ describe("handlePaddleEvent", () => {
     const event = fakeEvent("transaction.completed", { items: [{ price: { id: "pri_topup" } }], customData: { userId: 42 } });
     await handlePaddleEvent(event);
     expect(db.incrementVideoQuota).toHaveBeenCalledWith(42, 5);
-    expect(db.incrementStagingCredits).toHaveBeenCalledWith(42, 2);
     expect(db.setUserQuota).not.toHaveBeenCalled();
   });
 

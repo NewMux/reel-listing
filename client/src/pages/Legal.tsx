@@ -4,7 +4,7 @@ import { copy, useLocale } from "@/lib/locale";
 const sections = {
   en: [
     ["Using the service", "Reel Listing provides tools for creating real estate video projects. You are responsible for ensuring that you have the necessary rights, permissions, and consents for all property media, listing information, and brand materials you submit."],
-    ["AI-generated media", "Generated video is intended to support property marketing. Any virtual staging or AI-produced visual treatment must be used responsibly and clearly disclosed where required by applicable laws, platform policies, or professional standards."],
+    ["AI-generated media", "Generated video is intended to support property marketing. Any AI-produced visual treatment must be used responsibly and clearly disclosed where required by applicable laws, platform policies, or professional standards."],
     ["Your account", "Keep your access credentials secure and provide accurate account information. We may suspend access where we reasonably believe the service is being used unlawfully, fraudulently, or in a way that compromises the platform."],
     ["Information we collect", "We collect account details supplied through secure authentication, the property media and project metadata you submit, and limited technical information needed to keep the service reliable and secure."],
     ["How we use information", "We use project information to operate and improve the service, create and deliver requested video projects, protect against abuse, and communicate important service updates. We do not sell your property media."],
@@ -12,7 +12,7 @@ const sections = {
   ],
   ar: [
     ["استخدام الخدمة", "توفّر Reel Listing أدوات لإنشاء مشاريع فيديو عقارية. أنت مسؤول عن ضمان امتلاكك الحقوق والأذونات والموافقات اللازمة لكل وسائط العقار ومعلومات العرض والمواد التجارية التي ترفعها."],
-    ["الوسائط المولّدة بالذكاء الاصطناعي", "الفيديو المولَّد مخصص لدعم التسويق العقاري. يجب استخدام أي تجهيز افتراضي أو معالجة بصرية بالذكاء الاصطناعي بمسؤولية والإفصاح عنها بوضوح متى ما تطلبت ذلك القوانين المعمول بها أو سياسات المنصة أو المعايير المهنية."],
+    ["الوسائط المولّدة بالذكاء الاصطناعي", "الفيديو المولَّد مخصص لدعم التسويق العقاري. يجب استخدام أي معالجة بصرية بالذكاء الاصطناعي بمسؤولية والإفصاح عنها بوضوح متى ما تطلبت ذلك القوانين المعمول بها أو سياسات المنصة أو المعايير المهنية."],
     ["حسابك", "حافظ على أمان بيانات الدخول الخاصة بك وقدّم معلومات حساب دقيقة. يجوز لنا تعليق الوصول إذا اعتقدنا بشكل معقول أن الخدمة تُستخدم بشكل غير قانوني أو احتيالي أو بطريقة تُعرّض المنصة للخطر."],
     ["المعلومات التي نجمعها", "نجمع تفاصيل الحساب المقدَّمة عبر المصادقة الآمنة، ووسائط العقار وبيانات المشروع التي ترفعها، ومعلومات تقنية محدودة لازمة للحفاظ على موثوقية الخدمة وأمانها."],
     ["كيف نستخدم المعلومات", "نستخدم معلومات المشروع لتشغيل الخدمة وتحسينها، وإنشاء وتسليم مشاريع الفيديو المطلوبة، والحماية من إساءة الاستخدام، وإرسال تحديثات مهمة عن الخدمة. نحن لا نبيع وسائط عقارك."],

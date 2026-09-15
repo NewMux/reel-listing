@@ -35,7 +35,6 @@ export const billingRouter = router({
           }
         : null,
       videosRemaining: ctx.user.videosRemaining,
-      stagingCreditsRemaining: ctx.user.stagingCreditsRemaining,
     };
   }),
 

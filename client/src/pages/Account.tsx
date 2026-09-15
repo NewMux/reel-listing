@@ -86,14 +86,10 @@ export default function Account() {
           )}
         </section>
 
-        <section className="mt-4 grid gap-4 sm:grid-cols-2">
+        <section className="mt-4">
           <div className="rounded-[23px] border border-[#251811]/9 bg-white p-6">
             <p className="text-xs font-bold uppercase tracking-[.1em] text-[#7D736D]">{t.billing.videosRemaining}</p>
             <p className="serif mt-2 text-4xl tracking-[-.04em]">{subscriptionQuery.data?.videosRemaining ?? "—"}</p>
-          </div>
-          <div className="rounded-[23px] border border-[#251811]/9 bg-white p-6">
-            <p className="text-xs font-bold uppercase tracking-[.1em] text-[#7D736D]">{t.billing.stagingCreditsRemaining}</p>
-            <p className="serif mt-2 text-4xl tracking-[-.04em]">{subscriptionQuery.data?.stagingCreditsRemaining ?? "—"}</p>
           </div>
         </section>
 

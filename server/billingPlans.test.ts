@@ -19,7 +19,7 @@ describe("billing plan config parsing", () => {
   });
 
   it("parses a valid plan list and makes it findable by price id", async () => {
-    const json = JSON.stringify([{ priceId: "pri_1", planName: "Starter", videoQuota: 3, stagingCreditQuota: 5, displayPrice: "$89/mo" }]);
+    const json = JSON.stringify([{ priceId: "pri_1", planName: "Starter", videoQuota: 3, displayPrice: "$89/mo" }]);
     const { getBillingPlans, findPlanByPriceId } = await loadBillingPlans({ paddlePlansJson: json });
     expect(getBillingPlans()).toHaveLength(1);
     expect(findPlanByPriceId("pri_1")?.planName).toBe("Starter");
@@ -27,7 +27,7 @@ describe("billing plan config parsing", () => {
   });
 
   it("parses a valid top-up list", async () => {
-    const json = JSON.stringify([{ priceId: "pri_top1", name: "5 extra videos", videoCredits: 5, stagingCredits: 0, displayPrice: "$45" }]);
+    const json = JSON.stringify([{ priceId: "pri_top1", name: "5 extra videos", videoCredits: 5, displayPrice: "$45" }]);
     const { findTopupByPriceId } = await loadBillingPlans({ paddleTopupsJson: json });
     expect(findTopupByPriceId("pri_top1")?.videoCredits).toBe(5);
   });
@@ -50,8 +50,8 @@ describe("billing plan config parsing", () => {
 
   it("warns when a price id appears in both plans and top-ups", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const plan = JSON.stringify([{ priceId: "pri_shared", planName: "Starter", videoQuota: 3, stagingCreditQuota: 0, displayPrice: "$1" }]);
-    const topup = JSON.stringify([{ priceId: "pri_shared", name: "Extra", videoCredits: 5, stagingCredits: 0, displayPrice: "$1" }]);
+    const plan = JSON.stringify([{ priceId: "pri_shared", planName: "Starter", videoQuota: 3, displayPrice: "$1" }]);
+    const topup = JSON.stringify([{ priceId: "pri_shared", name: "Extra", videoCredits: 5, displayPrice: "$1" }]);
     const { getBillingPlans, getBillingTopups } = await loadBillingPlans({ paddlePlansJson: plan, paddleTopupsJson: topup });
     getBillingPlans();
     getBillingTopups();

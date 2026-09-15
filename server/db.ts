@@ -92,29 +92,10 @@ export async function incrementVideoQuota(userId: number, amount = 1): Promise<v
 }
 
 /** Sets the user's video quota to an absolute value -- used for subscription grant/renewal, where the plan's quota replaces (not adds to) whatever was left. */
-export async function setUserQuota(userId: number, { videosRemaining, stagingCreditsRemaining }: { videosRemaining: number; stagingCreditsRemaining: number }): Promise<void> {
+export async function setUserQuota(userId: number, { videosRemaining }: { videosRemaining: number }): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ videosRemaining, stagingCreditsRemaining, updatedAt: new Date() }).where(eq(users.id, userId));
-}
-
-/** Atomically decrements the user's virtual-staging credit balance. Returns the new count, or null if they have none left. */
-export async function decrementStagingCredits(userId: number): Promise<number | null> {
-  const db = await getDb();
-  if (!db) throw new Error("Account storage is temporarily unavailable.");
-  const result = await db
-    .update(users)
-    .set({ stagingCreditsRemaining: sql`${users.stagingCreditsRemaining} - 1` })
-    .where(and(eq(users.id, userId), gt(users.stagingCreditsRemaining, 0)))
-    .returning({ stagingCreditsRemaining: users.stagingCreditsRemaining });
-  return result[0]?.stagingCreditsRemaining ?? null;
-}
-
-/** Refunds staging credits, used when a staging attempt fails after the credit was already spent, or when a Paddle top-up purchase completes. */
-export async function incrementStagingCredits(userId: number, amount = 1): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.update(users).set({ stagingCreditsRemaining: sql`${users.stagingCreditsRemaining} + ${amount}` }).where(eq(users.id, userId));
+  await db.update(users).set({ videosRemaining, updatedAt: new Date() }).where(eq(users.id, userId));
 }
 
 export async function listVideoProjects(userId: number) {
