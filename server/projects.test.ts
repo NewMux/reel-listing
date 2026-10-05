@@ -6,7 +6,6 @@ import {
   isProjectStatus,
   validatePropertyMedia,
 } from "./projects";
-import { appendUploadChunk, createUploadSession } from "./uploadSessions";
 
 const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
@@ -48,11 +47,5 @@ describe("property media validation", () => {
       finalVideoUrl: "/manus-storage/final-film.mp4",
     });
     expect(() => getCompletionTransition("http://untrusted.example/film.mp4")).toThrow("secure media URL");
-  });
-
-  it("accepts bounded authenticated upload chunks and accounts for their bytes", () => {
-    const session = createUploadSession(42, "villa.jpg", "image/jpeg", 3);
-    expect(appendUploadChunk(42, session.id, "QUJD")).toEqual({ receivedBytes: 3, totalBytes: 3 });
-    expect(() => appendUploadChunk(41, session.id, "QQ==")).toThrow("expired");
   });
 });

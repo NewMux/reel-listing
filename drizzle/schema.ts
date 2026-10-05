@@ -1,75 +1,103 @@
-import { index, integer, jsonb, pgEnum, pgTable, serial, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { projectStatuses, renderPhases } from "../shared/video";
 
-/** Core account record populated from Manus OAuth. */
-export const userRole = pgEnum("user_role", ["user", "admin"]);
-export const projectStatus = pgEnum("project_status", ["Uploading", "Processing", "Review", "Done"]);
-export const renderPhase = pgEnum("render_phase", ["idle", "generating", "assembly", "complete", "failed"]);
+const createdAt = () => integer("createdAt", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).notNull();
 
-export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  openId: varchar("openId", { length: 64 }).notNull().unique(),
+/** Core account record. Credentials live in authCredentials so a user row never carries a password hash. */
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name"),
-  email: varchar("email", { length: 320 }),
-  loginMethod: varchar("loginMethod", { length: 64 }),
-  role: userRole("role").default("user").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerifiedAt: integer("emailVerifiedAt", { mode: "timestamp_ms" }),
+  role: text("role", { enum: ["user", "admin"] }).default("user").notNull(),
   videosRemaining: integer("videosRemaining").default(3).notNull(),
   stagingCreditsRemaining: integer("stagingCreditsRemaining").default(0).notNull(),
-  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
-  lastSignedIn: timestamp("lastSignedIn", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: createdAt(),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).notNull(),
+  lastSignedIn: integer("lastSignedIn", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).notNull(),
 });
+
+export const authCredentials = sqliteTable("auth_credentials", {
+  userId: integer("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  passwordHash: text("passwordHash").notNull(),
+  salt: text("salt").notNull(),
+  iterations: integer("iterations").notNull(),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).notNull(),
+});
+
+/** Signed-in browser sessions. id is the SHA-256 of the cookie token, so a leaked table can't be replayed. */
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: integer("expiresAt", { mode: "timestamp_ms" }).notNull(),
+    createdAt: createdAt(),
+  },
+  table => [index("sessions_user_idx").on(table.userId)],
+);
+
+/** One-time email links (verification, password reset). id is the SHA-256 of the emailed token. */
+export const authTokens = sqliteTable(
+  "auth_tokens",
+  {
+    id: text("id").primaryKey(),
+    userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    purpose: text("purpose", { enum: ["verify_email", "reset_password"] }).notNull(),
+    expiresAt: integer("expiresAt", { mode: "timestamp_ms" }).notNull(),
+    usedAt: integer("usedAt", { mode: "timestamp_ms" }),
+    createdAt: createdAt(),
+  },
+  table => [index("auth_tokens_user_idx").on(table.userId)],
+);
 
 export type ShotAnalysis = { shotType: string; timeOfDay: string; cameraMove: string; lighting: string; focus: string };
 
-export const videoProjects = pgTable(
+export const videoProjects = sqliteTable(
   "video_projects",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey({ autoIncrement: true }),
     userId: integer("userId").notNull(),
-    title: varchar("title", { length: 160 }).notNull(),
+    title: text("title").notNull(),
     description: text("description"),
-    location: varchar("location", { length: 180 }).notNull(),
-    mediaUrls: jsonb("mediaUrls").$type<string[]>().notNull(),
-    mediaKeys: jsonb("mediaKeys").$type<string[]>().notNull(),
-    mediaNames: jsonb("mediaNames").$type<string[]>().notNull(),
-    mediaTypes: jsonb("mediaTypes").$type<string[]>().notNull(),
-    status: projectStatus("status").default("Review").notNull(),
+    location: text("location").notNull(),
+    mediaUrls: text("mediaUrls", { mode: "json" }).$type<string[]>().notNull(),
+    mediaKeys: text("mediaKeys", { mode: "json" }).$type<string[]>().notNull(),
+    mediaNames: text("mediaNames", { mode: "json" }).$type<string[]>().notNull(),
+    mediaTypes: text("mediaTypes", { mode: "json" }).$type<string[]>().notNull(),
+    status: text("status", { enum: projectStatuses }).default("Review").notNull(),
     revisionNotes: text("revisionNotes"),
     finalVideoUrl: text("finalVideoUrl"),
-    promptRequestIds: jsonb("promptRequestIds").$type<(string | null)[]>().default([]),
-    generatedPrompts: jsonb("generatedPrompts").$type<(string | null)[]>().default([]),
+    promptRequestIds: text("promptRequestIds", { mode: "json" }).$type<(string | null)[]>().$defaultFn(() => []),
+    generatedPrompts: text("generatedPrompts", { mode: "json" }).$type<(string | null)[]>().$defaultFn(() => []),
     // Parsed per-photo vision output (shotType/timeOfDay/cameraMove/lighting/focus), persisted
     // separately from generatedPrompts so a client's customCameraMoves override can be applied
     // (or changed) and generatedPrompts rebuilt from it without paying for reclassification.
-    shotAnalysis: jsonb("shotAnalysis").$type<(ShotAnalysis | null)[]>().default([]),
+    shotAnalysis: text("shotAnalysis", { mode: "json" }).$type<(ShotAnalysis | null)[]>().$defaultFn(() => []),
     // A client-supplied camera-move override per photo; null means use shotAnalysis[index]'s
     // AI-suggested cameraMove. Every other shotAnalysis field (shotType, lighting, etc.) and all
     // of CINEMATIC_LOCK's safety/style rules still apply -- this only replaces the movement text.
-    customCameraMoves: jsonb("customCameraMoves").$type<(string | null)[]>().default([]),
+    customCameraMoves: text("customCameraMoves", { mode: "json" }).$type<(string | null)[]>().$defaultFn(() => []),
     // Per-photo clip length in seconds; null defaults to FAL_CLIP_SECONDS (10). Kling only
     // accepts "5" or "10" as a duration, so this is a toggle, not a free value.
-    clipDurations: jsonb("clipDurations").$type<(number | null)[]>().default([]),
-    falRequestIds: jsonb("falRequestIds").$type<(string | null)[]>().default([]),
-    clipUrls: jsonb("clipUrls").$type<(string | null)[]>().default([]),
+    clipDurations: text("clipDurations", { mode: "json" }).$type<(number | null)[]>().$defaultFn(() => []),
+    falRequestIds: text("falRequestIds", { mode: "json" }).$type<(string | null)[]>().$defaultFn(() => []),
+    clipUrls: text("clipUrls", { mode: "json" }).$type<(string | null)[]>().$defaultFn(() => []),
     renderProgress: integer("renderProgress").default(0).notNull(),
-    renderPhase: renderPhase("renderPhase").default("idle").notNull(),
+    renderPhase: text("renderPhase", { enum: renderPhases }).default("idle").notNull(),
     renderError: text("renderError"),
-    createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: createdAt(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).notNull(),
   },
-  table => [
-    index("video_projects_user_idx").on(table.userId),
-    index("video_projects_prompt_request_ids_gin_idx").using("gin", table.promptRequestIds),
-    index("video_projects_fal_request_ids_gin_idx").using("gin", table.falRequestIds),
-  ],
+  table => [index("video_projects_user_idx").on(table.userId)],
 );
 
-export const contactMessages = pgTable("contact_messages", {
-  id: serial("id").primaryKey(),
-  name: varchar("name", { length: 160 }).notNull(),
-  email: varchar("email", { length: 320 }).notNull(),
+export const contactMessages = sqliteTable("contact_messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
   message: text("message").notNull(),
-  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: createdAt(),
 });
 
 export type User = typeof users.$inferSelect;

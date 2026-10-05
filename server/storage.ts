@@ -1,30 +1,22 @@
-// Storage helpers for the deployed reel-listing app.
-// Prefer the built-in Forge storage when it is available; otherwise use the
-// private Supabase Storage bucket configured for the Vercel deployment.
+// Media storage on Cloudflare R2.
+//
+// Stored URLs are opaque `/manus-storage/<key>` markers (kept from the original storage
+// layer so existing URL checks stay valid); they are turned into short-lived signed URLs
+// whenever a project is presented. Browsers upload straight to R2 with a presigned PUT
+// (final reels can exceed the Worker request-body limit), and fal.ai fetches source photos
+// through presigned GETs. Both use R2's S3 API, so they need an R2 API token.
+//
+// Without that token (local `pnpm dev`), the Worker itself serves and accepts media at
+// /api/media/<key>, authorised by an HMAC signature, backed by the local R2 binding.
 
-import { createClient } from "@supabase/supabase-js";
-import { withRetry } from "@shared/retry";
+import { AwsClient } from "aws4fetch";
 import { ENV } from "./_core/env";
 
-const SUPABASE_BUCKET = "reel-listing-media";
+export const STORED_URL_PREFIX = "/manus-storage/";
+export const MEDIA_ROUTE_PREFIX = "/api/media/";
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
 
-type StorageData = Buffer | Uint8Array | string;
-
-function hasForgeConfig() {
-  return Boolean(ENV.forgeApiUrl && ENV.forgeApiKey);
-}
-
-function getSupabaseStorageClient(accessToken?: string) {
-  if (!ENV.supabaseUrl || !ENV.supabaseAnonKey || !accessToken) {
-    throw new Error("Storage config missing: set Supabase Storage access for the authenticated request.");
-  }
-
-  return createClient(ENV.supabaseUrl, ENV.supabaseAnonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-  });
-}
+type StorageData = ArrayBuffer | Uint8Array | string;
 
 function normalizeKey(relKey: string): string {
   return relKey.replace(/^\/+/, "");
@@ -37,104 +29,97 @@ function appendHashSuffix(relKey: string): string {
   return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
 }
 
-async function supabaseStoragePut(relKey: string, data: StorageData, contentType: string, accessToken: string) {
-  const key = appendHashSuffix(normalizeKey(relKey));
-  const body = typeof data === "string" ? data : new Uint8Array(data);
-  const { error } = await withRetry(
-    () => getSupabaseStorageClient(accessToken).storage.from(SUPABASE_BUCKET).upload(key, body, { contentType, upsert: false }),
-    { label: "Supabase Storage upload" },
-  );
-  if (error) throw new Error(`Supabase Storage upload failed: ${error.message}`);
-  return { key, url: `/manus-storage/${key}` };
+function encodeKey(key: string) {
+  return key.split("/").map(encodeURIComponent).join("/");
 }
+
+function hasR2ApiCredentials() {
+  const { accountId, accessKeyId, secretAccessKey, bucket } = ENV.r2;
+  return Boolean(accountId && accessKeyId && secretAccessKey && bucket);
+}
+
+let awsClient: AwsClient | null = null;
+function getAwsClient() {
+  if (!awsClient) {
+    const { accessKeyId, secretAccessKey } = ENV.r2;
+    awsClient = new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" });
+  }
+  return awsClient;
+}
+
+async function presignR2(method: "GET" | "PUT", key: string): Promise<string> {
+  const { accountId, bucket } = ENV.r2;
+  const url = new URL(`https://${accountId}.r2.cloudflarestorage.com/${bucket}/${encodeKey(key)}`);
+  url.searchParams.set("X-Amz-Expires", String(SIGNED_URL_TTL_SECONDS));
+  const signed = await getAwsClient().sign(new Request(url, { method }), { aws: { signQuery: true } });
+  return signed.url;
+}
+
+// ---- Local fallback: Worker-served media URLs signed with a per-isolate HMAC key. ----
+
+let localSigningKey: Promise<CryptoKey> | null = null;
+function getLocalSigningKey() {
+  localSigningKey ??= crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]) as Promise<CryptoKey>;
+  return localSigningKey;
+}
+
+function toHex(buffer: ArrayBuffer) {
+  return Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function fromHex(hex: string) {
+  if (!/^[0-9a-f]*$/.test(hex) || hex.length % 2) return new Uint8Array();
+  return new Uint8Array(hex.match(/../g)?.map(byte => parseInt(byte, 16)) ?? []);
+}
+
+async function signLocal(method: "GET" | "PUT", key: string): Promise<string> {
+  const expires = Math.floor(Date.now() / 1000) + SIGNED_URL_TTL_SECONDS;
+  const signature = await crypto.subtle.sign("HMAC", await getLocalSigningKey(), new TextEncoder().encode(`${method}\n${key}\n${expires}`));
+  return `${ENV.publicUrl}${MEDIA_ROUTE_PREFIX}${encodeKey(key)}?expires=${expires}&signature=${toHex(signature)}`;
+}
+
+export async function verifyLocalMediaSignature(method: string, key: string, expires: string | null, signature: string | null) {
+  if (hasR2ApiCredentials() || (method !== "GET" && method !== "PUT" && method !== "HEAD")) return false;
+  const expiresAt = Number(expires);
+  if (!signature || !Number.isFinite(expiresAt) || expiresAt < Date.now() / 1000) return false;
+  const signedMethod = method === "HEAD" ? "GET" : method;
+  return crypto.subtle.verify("HMAC", await getLocalSigningKey(), fromHex(signature), new TextEncoder().encode(`${signedMethod}\n${key}\n${expiresAt}`));
+}
+
+let warnedLocalFallback = false;
+function presign(method: "GET" | "PUT", key: string) {
+  if (hasR2ApiCredentials()) return presignR2(method, key);
+  if (!warnedLocalFallback) {
+    warnedLocalFallback = true;
+    // Fine for local dev; in production these URLs only verify in the isolate that signed them.
+    console.warn("[Storage] R2 API credentials are not set; serving media through the Worker. Set R2_* secrets in production.");
+  }
+  return signLocal(method, key);
+}
+
+// ---- Public API ----
 
 export async function storagePut(
   relKey: string,
   data: StorageData,
   contentType = "application/octet-stream",
-  accessToken?: string,
 ): Promise<{ key: string; url: string }> {
-  if (!hasForgeConfig()) {
-    if (!accessToken) throw new Error("Storage config missing: authenticated Supabase Storage access is required.");
-    return supabaseStoragePut(relKey, data, contentType, accessToken);
-  }
-
-  const target = await storageCreatePutTarget(relKey, accessToken);
-  const blob = typeof data === "string" ? new Blob([data], { type: contentType }) : new Blob([data as any]);
-  await withRetry(async () => {
-    const response = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": contentType }, body: blob });
-    if (!response.ok) throw new Error(`Storage upload to S3 failed (${response.status})`);
-    return response;
-  }, { label: "Forge storage upload" });
-  return { key: target.key, url: target.url };
-}
-
-export async function storageCreatePutTarget(relKey: string, accessToken?: string): Promise<{ key: string; url: string; uploadUrl: string }> {
-  if (!hasForgeConfig()) {
-    if (!accessToken) throw new Error("Storage config missing: authenticated Supabase Storage access is required.");
-    const key = appendHashSuffix(normalizeKey(relKey));
-    const { data, error } = await withRetry(
-      () => getSupabaseStorageClient(accessToken).storage.from(SUPABASE_BUCKET).createSignedUploadUrl(key),
-      { label: "Supabase Storage upload signing" },
-    );
-    if (error || !data?.signedUrl) throw new Error(`Supabase Storage signing failed: ${error?.message || "empty signed URL"}`);
-    return { key, url: `/manus-storage/${key}`, uploadUrl: data.signedUrl };
-  }
-
-  const forgeUrl = ENV.forgeApiUrl!.replace(/\/+$/, "");
   const key = appendHashSuffix(normalizeKey(relKey));
-  const presignUrl = new URL("v1/storage/presign/put", `${forgeUrl}/`);
-  presignUrl.searchParams.set("path", key);
-  const { url } = await withRetry(async () => {
-    const response = await fetch(presignUrl, { headers: { Authorization: `Bearer ${ENV.forgeApiKey}` } });
-    if (!response.ok) {
-      const msg = await response.text().catch(() => response.statusText);
-      throw new Error(`Storage presign failed (${response.status}): ${msg}`);
-    }
-    return (await response.json()) as { url: string };
-  }, { label: "Forge storage presign" });
-  if (!url) throw new Error("Forge returned empty presign URL");
-  return { key, url: `/manus-storage/${key}`, uploadUrl: url };
+  await ENV.media.put(key, data, { httpMetadata: { contentType } });
+  return { key, url: `${STORED_URL_PREFIX}${key}` };
 }
 
-export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
-  const key = normalizeKey(relKey);
-  return { key, url: `/manus-storage/${key}` };
+export async function storageCreatePutTarget(relKey: string): Promise<{ key: string; url: string; uploadUrl: string }> {
+  const key = appendHashSuffix(normalizeKey(relKey));
+  return { key, url: `${STORED_URL_PREFIX}${key}`, uploadUrl: await presign("PUT", key) };
 }
 
-// This is called concurrently, per photo, on every render-status poll, inside a 10s
-// Vercel function budget shared with the fal.ai calls that follow it -- keep the
-// retry budget tight (short timeout, few retries) rather than reusing generous defaults.
-const SIGN_RETRY_OPTIONS = { retries: 1, baseDelayMs: 250, maxDelayMs: 1_000, timeoutMs: 3_000 } as const;
-
-export async function storageGetSignedUrl(relKey: string, accessToken?: string): Promise<string> {
-  const key = normalizeKey(relKey);
-  if (!hasForgeConfig()) {
-    const { data, error } = await withRetry(
-      () => getSupabaseStorageClient(accessToken).storage.from(SUPABASE_BUCKET).createSignedUrl(key, SIGNED_URL_TTL_SECONDS),
-      { ...SIGN_RETRY_OPTIONS, label: "Supabase Storage signing" },
-    );
-    if (error || !data?.signedUrl) throw new Error(`Supabase Storage signing failed: ${error?.message || "empty signed URL"}`);
-    return data.signedUrl;
-  }
-
-  const forgeUrl = new URL("v1/storage/presign/get", ENV.forgeApiUrl!.replace(/\/+$/, "") + "/");
-  forgeUrl.searchParams.set("path", key);
-  const { url } = await withRetry(async () => {
-    const response = await fetch(forgeUrl, { headers: { Authorization: `Bearer ${ENV.forgeApiKey}` } });
-    if (!response.ok) {
-      const msg = await response.text().catch(() => response.statusText);
-      throw new Error(`Storage signed URL failed (${response.status}): ${msg}`);
-    }
-    return (await response.json()) as { url: string };
-  }, { ...SIGN_RETRY_OPTIONS, label: "Forge storage signed URL" });
-  if (!url) throw new Error("Empty signed URL from backend");
-  return url;
+export async function storageGetSignedUrl(relKey: string): Promise<string> {
+  return presign("GET", normalizeKey(relKey));
 }
 
-export async function signStoredUrl(value: string | null | undefined, accessToken?: string | null): Promise<string | null> {
+export async function signStoredUrl(value: string | null | undefined): Promise<string | null> {
   if (!value) return null;
-  if (!value.startsWith("/manus-storage/")) return value;
-  const key = value.slice("/manus-storage/".length);
-  return storageGetSignedUrl(key, accessToken ?? undefined);
+  if (!value.startsWith(STORED_URL_PREFIX)) return value;
+  return storageGetSignedUrl(value.slice(STORED_URL_PREFIX.length));
 }

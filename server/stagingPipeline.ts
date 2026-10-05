@@ -52,11 +52,10 @@ export async function stagePhoto(
   project: VideoProject,
   index: number,
   style: StagingStyle,
-  accessToken?: string | null,
 ): Promise<{ url: string; key: string; type: string }> {
   const client = getFalClient();
   const key = project.mediaKeys[index];
-  const sourceUrl = key.startsWith("pilot:") ? project.mediaUrls[index] : await storageGetSignedUrl(key, accessToken ?? undefined);
+  const sourceUrl = key.startsWith("pilot:") ? project.mediaUrls[index] : await storageGetSignedUrl(key);
 
   const result = await client.subscribe(FAL_STAGING_MODEL, {
     input: {
@@ -80,7 +79,6 @@ export async function stagePhoto(
     `property-projects/${userId}/staged/${Date.now()}-${index}.png`,
     imageBytes,
     "image/png",
-    accessToken ?? undefined,
   );
 
   return { url: uploaded.url, key: uploaded.key, type: "image/png" };

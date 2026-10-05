@@ -162,10 +162,10 @@ export function buildCinematicPrompt(index: number, direction: ShotAnalysis, pro
   ].join(" "));
 }
 
-async function getFalSourceUrls(project: VideoProject, accessToken?: string | null) {
+async function getFalSourceUrls(project: VideoProject) {
   return Promise.all(project.mediaKeys.map((key, index) => key.startsWith("pilot:")
     ? project.mediaUrls[index]
-    : storageGetSignedUrl(key, accessToken ?? undefined)));
+    : storageGetSignedUrl(key)));
 }
 
 function getFalClient() {
@@ -180,7 +180,9 @@ function getFalClient() {
 // next client poll -- keeps a render moving even if the customer closes the tab mid-generation.
 // The webhook handler treats this purely as a "go re-check now" hint (see server/_core/webhooks.ts);
 // it never trusts the webhook body itself, so this URL doesn't need to be a secret.
-const FAL_WEBHOOK_URL = `${ENV.publicUrl.replace(/\/+$/, "")}/api/webhooks/fal`;
+function falWebhookUrl() {
+  return `${ENV.publicUrl}/api/webhooks/fal`;
+}
 
 function propertyContext(project: VideoProject) {
   return [project.title, project.location, project.description].filter(Boolean).join(". ") || "high-end property listing";
@@ -263,7 +265,7 @@ async function submitVisionPromptJobs(client: typeof fal, signedImages: string[]
       temperature: 0.2,
       max_tokens: 260,
     },
-    webhookUrl: FAL_WEBHOOK_URL,
+    webhookUrl: falWebhookUrl(),
   })));
   return responses.map(response => response.request_id);
 }
@@ -278,7 +280,7 @@ async function submitVideoJobs(client: typeof fal, signedImages: string[], promp
       negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, generic left-to-right pan, slideshow motion, static frame, static camera, frozen camera, motionless camera, no camera movement, visual step change, object reveal, lighting change, before-and-after effect, artificial light bloom, door opening, door closing, window opening, window closing, curtains moving, blinds moving, cabinet opening, cabinet closing, objects animating independently, self-moving objects, subject leaving frame, camera drifting away from main subject, blur, distort, low quality, audio, voice, dialogue, music, people, animals, text, logo, watermark",
       cfg_scale: 0.6,
     },
-    webhookUrl: FAL_WEBHOOK_URL,
+    webhookUrl: falWebhookUrl(),
   })));
   return responses.map(response => response.request_id);
 }
@@ -287,9 +289,9 @@ async function submitVideoJobs(client: typeof fal, signedImages: string[], promp
 // user approves it -- lets the Review page show real per-photo shot direction instead of
 // decorative placeholders. Deliberately mirrors only the vision-submission half of
 // submitFalRender; it must never touch video jobs.
-export async function submitShotClassification(userId: number, project: VideoProject, accessToken?: string | null) {
+export async function submitShotClassification(userId: number, project: VideoProject) {
   const client = getFalClient();
-  const signedImages = await getFalSourceUrls(project, accessToken);
+  const signedImages = await getFalSourceUrls(project);
   const promptRequestIds = await submitVisionPromptJobs(client, signedImages, project);
   const generatedPrompts = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
   await updateVideoProject(userId, project.id, { promptRequestIds, generatedPrompts });
@@ -299,7 +301,7 @@ export async function submitShotClassification(userId: number, project: VideoPro
 // they land. Pre-approval, a single photo's classification failing or still being in flight is
 // cosmetic, not fatal -- fallbackPrompt already covers an unresolved photo at render time -- so
 // this never reports a hard failure and never submits a video job under any circumstance.
-export async function refreshShotClassification(userId: number, project: VideoProject, accessToken?: string | null) {
+export async function refreshShotClassification(userId: number, project: VideoProject) {
   const promptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
   const generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
   const shotAnalysis = asShotAnalysisArray(project.shotAnalysis, project.mediaUrls.length);
@@ -327,7 +329,7 @@ export async function refreshShotClassification(userId: number, project: VideoPr
   return { generatedPrompts, ready: allReady(generatedPrompts, project.mediaUrls.length) };
 }
 
-export async function submitFalRender(userId: number, project: VideoProject, accessToken?: string | null) {
+export async function submitFalRender(userId: number, project: VideoProject) {
   const client = getFalClient();
   const existingPromptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
   const alreadyClassifying = existingPromptRequestIds.some(Boolean);
@@ -340,7 +342,7 @@ export async function submitFalRender(userId: number, project: VideoProject, acc
   let generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
   let shotAnalysis = asShotAnalysisArray(project.shotAnalysis, project.mediaUrls.length);
   if (!alreadyClassifying) {
-    const signedImages = await getFalSourceUrls(project, accessToken);
+    const signedImages = await getFalSourceUrls(project);
     promptRequestIds = await submitVisionPromptJobs(client, signedImages, project);
     generatedPrompts = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
     shotAnalysis = Array.from({ length: project.mediaUrls.length }, () => null as ShotAnalysis | null);
@@ -373,7 +375,7 @@ export async function submitFalRender(userId: number, project: VideoProject, acc
   });
 }
 
-export async function refreshFalRender(userId: number, project: VideoProject, accessToken?: string | null): Promise<RenderStatusSnapshot> {
+export async function refreshFalRender(userId: number, project: VideoProject): Promise<RenderStatusSnapshot> {
   const promptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
   const generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
   const shotAnalysis = asShotAnalysisArray(project.shotAnalysis, project.mediaUrls.length);
@@ -419,7 +421,7 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
 
   if (!allReady(requestIds, project.mediaUrls.length)) {
     const signedImages = project.mediaKeys.length === project.mediaUrls.length
-      ? await getFalSourceUrls(project, accessToken)
+      ? await getFalSourceUrls(project)
       : [];
     if (!signedImages.length) throw new Error("Property images could not be prepared for fal.ai.");
     requestIds = await submitVideoJobs(client, signedImages, prompts, project);
