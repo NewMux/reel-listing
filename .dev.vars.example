@@ -1,0 +1,12 @@
+# Copy to .dev.vars for local development (`pnpm dev`). Production values are set
+# with `wrangler secret put <NAME>`.
+FAL_KEY=
+# R2 S3-API credentials, used only to presign browser upload/download URLs.
+# Create under R2 > Manage API tokens (Object Read & Write on the media bucket).
+R2_ACCOUNT_ID=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+# Accounts signing up with this email are made admins.
+OWNER_EMAIL=
+# Local dev: links in auth emails point here.
+PUBLIC_URL=http://localhost:3000

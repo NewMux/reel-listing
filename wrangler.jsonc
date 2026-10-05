@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "reel-listing",
+  "account_id": "45acf34fed5edb3da6322fa22df05c2b",
+  "main": "server/worker.ts",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "reel-listing",
+      "database_id": "1c8e2c3f-7fde-4d5a-85cb-da6025951d90",
+      "migrations_dir": "drizzle/migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "reel-listing-media" }],
+  "send_email": [{ "name": "EMAIL" }],
+  "ratelimits": [
+    // Contact form: 5 per IP per minute window. Auth: sign-in/sign-up/reset attempts per IP+email.
+    { "name": "CONTACT_RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } },
+    { "name": "AUTH_RATE_LIMITER", "namespace_id": "1002", "simple": { "limit": 10, "period": 60 } }
+  ],
+  "vars": {
+    "PUBLIC_URL": "https://reel-listing.com",
+    "R2_BUCKET": "reel-listing-media",
+    "EMAIL_FROM": "no-reply@reel-listing.com"
+  }
+  // Secrets (set with `wrangler secret put <NAME>`, or in .dev.vars locally):
+  //   FAL_KEY, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, OWNER_EMAIL
+}

@@ -1,4 +1,3 @@
-import type { Express } from "express";
 import { getVideoProjectByRequestId } from "../db";
 import { refreshFalRender } from "../falPipeline";
 
@@ -14,23 +13,24 @@ import { refreshFalRender } from "../falPipeline";
 // request_id an attacker would first have to already know. Client polling remains the primary,
 // fully-trusted path regardless -- this is a latency/resilience optimization on top of it, not
 // a new source of truth.
-export function registerFalWebhook(app: Express) {
-  app.post("/api/webhooks/fal", async (req, res) => {
-    const requestId = typeof req.body?.request_id === "string" ? req.body.request_id : null;
-    if (!requestId) {
-      res.status(200).send("ignored");
-      return;
-    }
+export async function handleFalWebhook(request: Request, waitUntil: (promise: Promise<unknown>) => void) {
+  const body = (await request.json().catch(() => null)) as { request_id?: unknown } | null;
+  const requestId = typeof body?.request_id === "string" ? body.request_id : null;
+  if (!requestId) return new Response("ignored", { status: 200 });
 
-    try {
-      const project = await getVideoProjectByRequestId(requestId);
-      if (project) await refreshFalRender(project.userId, project);
-    } catch (error) {
-      console.warn("[FalWebhook] refresh failed for request", requestId, error);
-    }
+  // Answer immediately and finish the refresh in the background.
+  waitUntil(
+    (async () => {
+      try {
+        const project = await getVideoProjectByRequestId(requestId);
+        if (project) await refreshFalRender(project.userId, project);
+      } catch (error) {
+        console.warn("[FalWebhook] refresh failed for request", requestId, error);
+      }
+    })(),
+  );
 
-    // Always 200: fal.ai retries webhook delivery on non-2xx, and this is a best-effort nudge,
-    // never the only path to progress -- no reason to make it retry on our transient errors.
-    res.status(200).send("ok");
-  });
+  // Always 200: fal.ai retries webhook delivery on non-2xx, and this is a best-effort nudge,
+  // never the only path to progress -- no reason to make it retry on our transient errors.
+  return new Response("ok", { status: 200 });
 }

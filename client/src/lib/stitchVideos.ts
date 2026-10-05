@@ -1,7 +1,5 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile } from "@ffmpeg/util";
-import coreURL from "@ffmpeg/core?url";
-import wasmURL from "@ffmpeg/core/wasm?url";
+import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { FAL_CLIP_SECONDS } from "@shared/video";
 import { withRetry } from "@shared/retry";
 
@@ -14,6 +12,11 @@ export type StitchProgress = {
 // dissolve rather than a flicker, short enough not to eat into each room's own shot.
 const TRANSITION_SECONDS = 0.6;
 
+// The ffmpeg core wasm (~31 MiB) is over Cloudflare Workers' 25 MiB static-asset limit, so it
+// is loaded from a CDN, pinned to the @ffmpeg/core version in package.json. Blob URLs let the
+// cross-origin script run inside ffmpeg's module worker.
+const FFMPEG_CORE_BASE_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm";
+
 let ffmpeg: FFmpeg | null = null;
 let loadPromise: Promise<FFmpeg> | null = null;
 
@@ -21,10 +24,20 @@ async function getFFmpeg() {
   if (ffmpeg?.loaded) return ffmpeg;
   if (!loadPromise) {
     const instance = new FFmpeg();
-    loadPromise = instance.load({ coreURL, wasmURL }).then(() => {
-      ffmpeg = instance;
-      return instance;
-    });
+    loadPromise = Promise.all([
+      toBlobURL(`${FFMPEG_CORE_BASE_URL}/ffmpeg-core.js`, "text/javascript"),
+      toBlobURL(`${FFMPEG_CORE_BASE_URL}/ffmpeg-core.wasm`, "application/wasm"),
+    ])
+      .then(([coreURL, wasmURL]) => instance.load({ coreURL, wasmURL }))
+      .then(() => {
+        ffmpeg = instance;
+        return instance;
+      })
+      .catch(error => {
+        // Let the next attempt retry the download instead of caching the failure forever.
+        loadPromise = null;
+        throw error;
+      });
   }
   return loadPromise;
 }

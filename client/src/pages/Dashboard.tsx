@@ -4,7 +4,7 @@ import { AppSidebar, StatusPill } from "@/components/AppChrome";
 import { copy, useLocale } from "@/lib/locale";
 import { trpc } from "@/lib/trpc";
 
-const PROJECT_IMAGE = "/manus-storage/vistaflow-project-villa_cdc98c35.jpg";
+const PROJECT_IMAGE = "/example-entrance.jpg";
 
 export default function Dashboard() {
   const { locale } = useLocale(); const t = copy[locale]; const [, setLocation] = useLocation(); const projects = trpc.projects.list.useQuery();

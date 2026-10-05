@@ -1,18 +1,43 @@
+import { env } from "cloudflare:workers";
+
+// Bindings (D1, R2, email, rate limiters) and vars/secrets from wrangler.jsonc / .dev.vars.
+// Read lazily so a value is always the one bound to the current Worker, never a stale copy.
 export const ENV = {
-  appId: process.env.VITE_APP_ID ?? "",
-  cookieSecret: process.env.JWT_SECRET ?? "",
-  databaseUrl: process.env.DATABASE_URL ?? "",
-  oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
-  ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
-  isProduction: process.env.NODE_ENV === "production",
-  forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
-  forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
-  falKey: process.env.FAL_KEY ?? "",
-  supabaseUrl: process.env.SUPABASE_URL ?? "",
-  supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? "",
-  // The stable production domain, used to build callback URLs (e.g. fal.ai webhooks) that
-  // must keep working across redeploys -- deliberately not derived from Vercel's per-deployment URL.
-  publicUrl: process.env.PUBLIC_URL ?? "https://reel-listing.com",
-  upstashRedisUrl: process.env.UPSTASH_REDIS_REST_URL ?? "",
-  upstashRedisToken: process.env.UPSTASH_REDIS_REST_TOKEN ?? "",
+  get db() {
+    return env.DB;
+  },
+  get media() {
+    return env.MEDIA;
+  },
+  get email() {
+    return env.EMAIL;
+  },
+  get contactRateLimiter() {
+    return env.CONTACT_RATE_LIMITER;
+  },
+  get authRateLimiter() {
+    return env.AUTH_RATE_LIMITER;
+  },
+  get falKey(): string {
+    return env.FAL_KEY ?? "";
+  },
+  get ownerEmail(): string {
+    return (env.OWNER_EMAIL ?? "").trim().toLowerCase();
+  },
+  get emailFrom(): string {
+    return env.EMAIL_FROM ?? "";
+  },
+  get r2(): { accountId: string; accessKeyId: string; secretAccessKey: string; bucket: string } {
+    return {
+      accountId: env.R2_ACCOUNT_ID ?? "",
+      accessKeyId: env.R2_ACCESS_KEY_ID ?? "",
+      secretAccessKey: env.R2_SECRET_ACCESS_KEY ?? "",
+      bucket: env.R2_BUCKET ?? "",
+    };
+  },
+  // The stable production domain, used to build callback URLs (fal.ai webhooks, emailed
+  // auth links) that must keep working across redeploys.
+  get publicUrl(): string {
+    return (env.PUBLIC_URL || "https://reel-listing.com").replace(/\/+$/, "");
+  },
 };

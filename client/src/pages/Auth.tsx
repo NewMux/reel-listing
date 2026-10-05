@@ -3,7 +3,6 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Footer, PublicNav } from "@/components/AppChrome";
 import { copy, useLocale } from "@/lib/locale";
-import { supabase } from "@/lib/supabase";
 import { trpc } from "@/lib/trpc";
 
 type Mode = "signIn" | "signUp" | "forgotPassword";
@@ -13,6 +12,9 @@ export default function Auth() {
   const t = copy[locale];
   const [, setLocation] = useLocation();
   const meQuery = trpc.auth.me.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
+  const signIn = trpc.auth.signIn.useMutation();
+  const signUp = trpc.auth.signUp.useMutation();
+  const requestReset = trpc.auth.requestPasswordReset.useMutation();
   const [mode, setMode] = useState<Mode>("signIn");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -33,35 +35,22 @@ export default function Auth() {
     setError("");
 
     try {
-      if (!supabase) throw new Error(t.auth.notConfigured);
-
       if (mode === "forgotPassword") {
-        const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-          redirectTo: `${window.location.origin}/reset-password`,
-        });
-        if (resetError) throw resetError;
+        await requestReset.mutateAsync({ email: email.trim() });
         setMessage(t.auth.resetRequestSent);
         return;
       }
 
-      const result = mode === "signIn"
-        ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
-        : await supabase.auth.signUp({ email: email.trim(), password });
-      if (result.error) throw result.error;
-
-      if (mode === "signUp" && !result.data.session) {
-        // Supabase returns success with no session and no error for both a genuine new
-        // signup and a repeat signup against an existing, already-confirmed email (it
-        // deliberately avoids a distinguishing error to prevent email enumeration). The
-        // documented client-side signal to tell them apart: identities is empty only
-        // when the account already existed, since no new identity was created.
-        const isRepeatSignup = result.data.user?.identities?.length === 0;
-        setMessage(isRepeatSignup ? t.auth.repeatSignup : t.auth.signUpConfirm);
+      if (mode === "signUp") {
+        await signUp.mutateAsync({ email: email.trim(), password });
+        setMessage(t.auth.signUpConfirm);
         setMode("signIn");
-      } else {
-        await meQuery.refetch();
-        setLocation("/dashboard");
+        return;
       }
+
+      await signIn.mutateAsync({ email: email.trim(), password });
+      await meQuery.refetch();
+      setLocation("/dashboard");
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : t.auth.errorFallback);
     } finally {
@@ -86,7 +75,7 @@ export default function Auth() {
         <p className="mt-2 text-sm leading-6 text-[#7A706B]">{mode === "signIn" ? t.auth.welcomeBackBody : mode === "signUp" ? t.auth.createWorkspaceBody : t.auth.resetRequestBody}</p>
         <form onSubmit={submit} className="mt-7 space-y-4">
           <label className="block"><span className="text-xs font-bold uppercase tracking-[.12em] text-[#7B5B49]">{t.auth.emailLabel}</span><input required type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#251811]/12 bg-[#FCFAF9] px-4 text-sm outline-none focus:border-[#936245]" placeholder={t.auth.emailPlaceholder} /></label>
-          {mode !== "forgotPassword" && <label className="block"><span className="text-xs font-bold uppercase tracking-[.12em] text-[#7B5B49]">{t.auth.passwordLabel}</span><input required minLength={6} type="password" autoComplete={mode === "signIn" ? "current-password" : "new-password"} value={password} onChange={event => setPassword(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#251811]/12 bg-[#FCFAF9] px-4 text-sm outline-none focus:border-[#936245]" placeholder={t.auth.passwordPlaceholder} /></label>}
+          {mode !== "forgotPassword" && <label className="block"><span className="text-xs font-bold uppercase tracking-[.12em] text-[#7B5B49]">{t.auth.passwordLabel}</span><input required minLength={mode === "signUp" ? 8 : 1} type="password" autoComplete={mode === "signIn" ? "current-password" : "new-password"} value={password} onChange={event => setPassword(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#251811]/12 bg-[#FCFAF9] px-4 text-sm outline-none focus:border-[#936245]" placeholder={t.auth.passwordPlaceholder} /></label>}
           {mode === "signIn" && <button type="button" onClick={() => switchMode("forgotPassword")} className="block text-xs font-semibold text-[#7B5B49] underline underline-offset-2 hover:text-[#251811]">{t.auth.forgotPasswordLink}</button>}
           {message && <p className="flex items-start gap-2 rounded-xl bg-[#F7ECE6] px-4 py-3 text-sm leading-6 text-[#70452C]"><CheckCircle2 size={17} className="mt-0.5 shrink-0" />{message}</p>}
           {error && <p className="rounded-xl bg-[#FFEFE5] px-4 py-3 text-sm leading-6 text-[#94522C]">{error}</p>}
