@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "reel-listing",
+  "account_id": "45acf34fed5edb3da6322fa22df05c2b",
   "main": "server/worker.ts",
   "compatibility_date": "2026-08-15",
   "compatibility_flags": ["nodejs_compat"],
@@ -15,8 +16,7 @@
     {
       "binding": "DB",
       "database_name": "reel-listing",
-      // Replace with the id printed by `wrangler d1 create reel-listing`.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "1c8e2c3f-7fde-4d5a-85cb-da6025951d90",
       "migrations_dir": "drizzle/migrations"
     }
   ],
