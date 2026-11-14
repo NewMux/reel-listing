@@ -38,6 +38,9 @@ export async function createConfiguredApp(server?: Server) {
 async function startServer() {
   const server = createServer();
   const app = await createConfiguredApp(server);
+  // The server is created bare so Vite's HMR can attach to it first; without this line it
+  // accepts connections but never answers a request.
+  server.on("request", app);
   const preferredPort = parseInt(process.env.PORT || "3000", 10);
   const port = await findAvailablePort(preferredPort);
 

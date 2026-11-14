@@ -9,10 +9,11 @@ import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
   createVideoProject,
   decrementStagingCredits,
-  decrementVideoQuota,
   getVideoProject,
+  getVideoProjectByShareToken,
+  grantCredits,
+  spendCredits,
   incrementStagingCredits,
-  incrementVideoQuota,
   insertContactMessage,
   listVideoProjects,
   updateVideoProject,
@@ -22,13 +23,16 @@ import { checkRateLimit } from "./rateLimit";
 import {
   getApprovalTransition,
   getChangeRequestTransition,
-  getCompletionTransition,
   validateUploadedPropertyMedia,
 } from "./projects";
 import { signStoredUrl, storageCreatePutTarget, storageGetSignedUrl } from "./storage";
 import { appendUploadChunk, createUploadSession, finalizeUploadSession } from "./uploadSessions";
 import { getProjectRenderStatus, getShotPlan } from "./renderPipeline";
-import { buildCinematicPrompt, refreshFalRender, refreshShotClassification, submitFalRender, submitShotClassification } from "./falPipeline";
+import { buildCinematicPrompt, InsufficientCreditsError, refreshFalRender, refreshShotClassification, regenerateClip, submitFalRender, submitShotClassification } from "./falPipeline";
+import { createCheckoutSession } from "./billing";
+import { PLAN_IDS, renderCost } from "../shared/billing";
+import { FAL_CLIP_SECONDS, FAL_PROMPT_MAX_CHARS } from "../shared/video";
+import { nanoid } from "nanoid";
 
 const fileSchema = z.object({
   name: z.string().min(1).max(240),
@@ -77,6 +81,10 @@ async function presentRender(snapshot: Awaited<ReturnType<typeof getProjectRende
     finalVideoUrl: await signStoredUrl(snapshot.finalVideoUrl, accessToken),
     shots: snapshot.shots.map((shot, index) => ({ ...shot, sourceUrl: resolvedSourceUrls[index] || shot.sourceUrl })),
   };
+}
+
+function creditShortfall(required: number, balance: number) {
+  return `Not enough credits: this needs ${required} and you have ${balance}. Add credits on the pricing page.`;
 }
 
 export const appRouter = router({
@@ -215,9 +223,11 @@ export const appRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
       try {
         const transition = getApprovalTransition(project.status);
-        const remaining = await decrementVideoQuota(ctx.user.id);
-        if (remaining === null) {
-          throw new Error("You've used all of your included videos. Contact us to add more before rendering another reel.");
+        // 1 credit per second of video: the render costs exactly the clip lengths chosen.
+        const cost = renderCost(project.mediaUrls.map((_, index) => project.clipDurations?.[index] ?? FAL_CLIP_SECONDS));
+        const reference = `render:${project.id}:${Date.now()}`;
+        if ((await spendCredits(ctx.user.id, cost, "render", reference)) === null) {
+          throw new Error(creditShortfall(cost, ctx.user.credits));
         }
         try {
           const render = await submitFalRender(ctx.user.id, project, ctx.supabaseAccessToken);
@@ -233,7 +243,7 @@ export const appRouter = router({
           ]);
           return { project: presentedProject, render: presentedRender };
         } catch (renderError) {
-          await incrementVideoQuota(ctx.user.id).catch(() => {});
+          await grantCredits(ctx.user.id, cost, "refund", `refund:${reference}`).catch(() => {});
           throw renderError;
         }
       } catch (error) {
@@ -257,11 +267,24 @@ export const appRouter = router({
             throw new Error("Invalid photo order.");
           }
           const reindex = <T,>(values: T[]) => input.order.map(index => values[index]);
+          // Direction, overrides and lengths belong to a photo, not a slot: move them with it,
+          // or a reorder would render each photo with another photo's prompt.
+          const reindexOptional = <T,>(values: (T | null)[] | null | undefined) => values?.length ? input.order.map(index => values[index] ?? null) : undefined;
+          const moved = { ...project, mediaUrls: reindex(project.mediaUrls), customCameraMoves: reindexOptional(project.customCameraMoves) ?? [], clipDurations: reindexOptional(project.clipDurations) ?? [] };
+          const shotAnalysis = reindexOptional(project.shotAnalysis);
+          // Guided prompts mention the shot's position ("shot 3 of 10"), so rebuild them in place.
+          const generatedPrompts = reindexOptional(project.generatedPrompts)?.map((prompt, index) => shotAnalysis?.[index] ? buildCinematicPrompt(index, shotAnalysis[index]!, moved) : prompt);
           const updated = await updateVideoProject(ctx.user.id, input.id, {
-            mediaUrls: reindex(project.mediaUrls),
+            mediaUrls: moved.mediaUrls,
             mediaKeys: reindex(project.mediaKeys),
             mediaNames: reindex(project.mediaNames),
             mediaTypes: reindex(project.mediaTypes),
+            promptRequestIds: reindexOptional(project.promptRequestIds),
+            generatedPrompts,
+            shotAnalysis,
+            customCameraMoves: reindexOptional(project.customCameraMoves),
+            customPrompts: reindexOptional(project.customPrompts),
+            clipDurations: reindexOptional(project.clipDurations),
           });
           if (!updated) throw new Error("The project could not be updated.");
           return presentProject(updated, ctx.supabaseAccessToken);
@@ -342,7 +365,7 @@ export const appRouter = router({
         projectIdInput(input.id);
         const project = await getVideoProject(ctx.user.id, input.id);
         if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
-        const overrides = { customCameraMoves: project.customCameraMoves || [], clipDurations: project.clipDurations || [] };
+        const overrides = { customCameraMoves: project.customCameraMoves || [], clipDurations: project.clipDurations || [], customPrompts: project.customPrompts || [] };
         if (project.status !== "Review" || !project.promptRequestIds?.length) {
           return { shots: getShotPlan(project.mediaUrls, project.generatedPrompts || []), shotAnalysis: project.shotAnalysis || [], ready: true, ...overrides };
         }
@@ -361,6 +384,8 @@ export const appRouter = router({
         index: z.number().int().nonnegative(),
         cameraMove: z.string().trim().max(360).nullable().optional(),
         durationSeconds: z.union([z.literal(5), z.literal(10)]).nullable().optional(),
+        // The customer's own full prompt for this photo; null returns it to guided direction.
+        customPrompt: z.string().trim().max(FAL_PROMPT_MAX_CHARS).nullable().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         projectIdInput(input.id);
@@ -377,6 +402,8 @@ export const appRouter = router({
           const clipDurations = asOverrideArray(project.clipDurations, project.mediaUrls.length);
           if (input.cameraMove !== undefined) customCameraMoves[input.index] = input.cameraMove || null;
           if (input.durationSeconds !== undefined) clipDurations[input.index] = input.durationSeconds;
+          const customPrompts = asOverrideArray(project.customPrompts, project.mediaUrls.length);
+          if (input.customPrompt !== undefined) customPrompts[input.index] = input.customPrompt || null;
 
           const updatedProject = { ...project, customCameraMoves, clipDurations };
           const shotAnalysis = project.shotAnalysis?.[input.index];
@@ -385,33 +412,94 @@ export const appRouter = router({
           // no fal.ai call needed, so editing an override is instant and free.
           if (shotAnalysis) generatedPrompts[input.index] = buildCinematicPrompt(input.index, shotAnalysis, updatedProject);
 
-          const updated = await updateVideoProject(ctx.user.id, input.id, { customCameraMoves, clipDurations, generatedPrompts });
+          const updated = await updateVideoProject(ctx.user.id, input.id, { customCameraMoves, clipDurations, customPrompts, generatedPrompts });
           if (!updated) throw new Error("The project could not be updated.");
-          return { shots: getShotPlan(updated.mediaUrls, updated.generatedPrompts || []), shotAnalysis: updated.shotAnalysis || [], customCameraMoves: updated.customCameraMoves || [], clipDurations: updated.clipDurations || [], ready: true };
+          return { shots: getShotPlan(updated.mediaUrls, updated.generatedPrompts || []), shotAnalysis: updated.shotAnalysis || [], customCameraMoves: updated.customCameraMoves || [], clipDurations: updated.clipDurations || [], customPrompts: updated.customPrompts || [], ready: true };
         } catch (error) {
           console.error(`[Projects] updateShotOverride failed for project ${input.id}, index ${input.index}:`, error);
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to update this shot." });
         }
       }),
-    complete: protectedProcedure
-      .input(z.object({ id: z.number().int().positive(), finalVideoUrl: z.string().min(1).max(2_000) }))
+    regenerateClip: protectedProcedure
+      .input(z.object({
+        id: z.number().int().positive(),
+        index: z.number().int().nonnegative(),
+        // Omit to keep the clip's current prompt; null switches back to guided direction.
+        prompt: z.string().trim().max(FAL_PROMPT_MAX_CHARS).nullable().optional(),
+        durationSeconds: z.union([z.literal(5), z.literal(10)]).optional(),
+      }))
       .mutation(async ({ ctx, input }) => {
         projectIdInput(input.id);
-        const project = await getVideoProject(ctx.user.id, input.id);
-        if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
         try {
-          if (!input.finalVideoUrl.startsWith(`/manus-storage/property-projects/${ctx.user.id}/outputs/`)) {
-            throw new Error("Final delivery must belong to this project account.");
-          }
-          if (project.status !== "Processing" || !project.clipUrls?.length || project.clipUrls.some(url => !url)) {
-            throw new Error("All cinematic clips must be ready before final delivery.");
-          }
-          return updateVideoProject(ctx.user.id, input.id, { ...getCompletionTransition(input.finalVideoUrl), renderProgress: 100, renderPhase: "complete", renderError: null });
+          const updated = await regenerateClip(ctx.user.id, input.id, input.index, { prompt: input.prompt, durationSeconds: input.durationSeconds }, ctx.supabaseAccessToken);
+          return presentRender(getProjectRenderStatus(updated), updated, ctx.supabaseAccessToken);
         } catch (error) {
-          console.error(`[Projects] complete failed for project ${input.id}:`, error);
-          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Unable to complete this project." });
+          console.error(`[Projects] regenerateClip failed for project ${input.id}, index ${input.index}:`, error);
+          const message = error instanceof InsufficientCreditsError
+            ? creditShortfall(error.required, ctx.user.credits)
+            : error instanceof Error ? error.message : "Unable to regenerate this clip.";
+          throw new TRPCError({ code: "BAD_REQUEST", message });
         }
       }),
+    // Re-runs final assembly after it failed. Free: every clip is already paid for and rendered.
+    resumeRender: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      projectIdInput(input.id);
+      const project = await getVideoProject(ctx.user.id, input.id);
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+      if (project.status !== "Processing" || project.renderPhase !== "failed") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "This project has nothing to resume." });
+      }
+      if (project.clipErrors?.some(Boolean)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Retry the failed clips first." });
+      }
+      await updateVideoProject(ctx.user.id, input.id, { renderPhase: "generating", renderError: null, assemblyRequestId: null });
+      return { success: true } as const;
+    }),
+    // Turns on (or returns) the public watch link for a finished reel.
+    share: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      projectIdInput(input.id);
+      const project = await getVideoProject(ctx.user.id, input.id);
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found." });
+      if (project.status !== "Done" || !project.finalVideoUrl) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Finish the reel before sharing it." });
+      }
+      const token = project.shareToken || nanoid(24);
+      if (!project.shareToken) await updateVideoProject(ctx.user.id, input.id, { shareToken: token });
+      return { token };
+    }),
+    unshare: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      projectIdInput(input.id);
+      await updateVideoProject(ctx.user.id, input.id, { shareToken: null });
+      return { success: true } as const;
+    }),
+  }),
+  // Public, unauthenticated: anyone holding the link can watch the reel -- nothing else about
+  // the project (source photos, prompts, owner) is exposed.
+  shared: router({
+    get: publicProcedure.input(z.object({ token: z.string().min(16).max(40).regex(/^[A-Za-z0-9_-]+$/) })).query(async ({ input }) => {
+      const project = await getVideoProjectByShareToken(input.token);
+      if (!project || project.status !== "Done" || !project.finalVideoUrl) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "This reel is no longer available." });
+      }
+      let videoUrl: string | null = null;
+      try {
+        videoUrl = await signStoredUrl(project.finalVideoUrl, null);
+      } catch (error) {
+        // A reel kept in private Storage can only be signed here with SUPABASE_SERVICE_ROLE_KEY.
+        console.error(`[Shared] could not sign reel for project ${project.id}:`, error);
+      }
+      if (!videoUrl) throw new TRPCError({ code: "NOT_FOUND", message: "This reel is no longer available." });
+      return { title: project.title, location: project.location, description: project.description, videoUrl };
+    }),
+  }),
+  billing: router({
+    checkout: protectedProcedure.input(z.object({ plan: z.enum(PLAN_IDS) })).mutation(async ({ ctx, input }) => {
+      try {
+        return { url: await createCheckoutSession(ctx.user, input.plan) };
+      } catch (error) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Checkout could not be started." });
+      }
+    }),
   }),
   media: router({
     createUploadSession: protectedProcedure

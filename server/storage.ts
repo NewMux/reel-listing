@@ -16,6 +16,13 @@ function hasForgeConfig() {
 }
 
 function getSupabaseStorageClient(accessToken?: string) {
+  // No customer session (a webhook, or a public share page): fall back to the service role
+  // when one is configured. Callers on those paths have already decided the read is allowed.
+  if (!accessToken && ENV.supabaseUrl && ENV.supabaseServiceRoleKey) {
+    return createClient(ENV.supabaseUrl, ENV.supabaseServiceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  }
   if (!ENV.supabaseUrl || !ENV.supabaseAnonKey || !accessToken) {
     throw new Error("Storage config missing: set Supabase Storage access for the authenticated request.");
   }
