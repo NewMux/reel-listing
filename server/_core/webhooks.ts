@@ -34,3 +34,23 @@ export function registerFalWebhook(app: Express) {
     res.status(200).send("ok");
   });
 }
+
+// Kling's callback for clips rendered on its own API. Same contract as the fal.ai webhook above:
+// the body is only a hint naming a task id; the real state always comes from re-querying Kling
+// with our own key inside refreshFalRender.
+export function registerKlingWebhook(app: Express) {
+  app.post("/api/webhooks/kling", async (req, res) => {
+    const taskId = typeof req.body?.id === "string" || typeof req.body?.id === "number" ? String(req.body.id) : null;
+    const status = typeof req.body?.status === "string" ? req.body.status : null;
+    // Kling calls back on every status change; only a finished task can move a render forward.
+    if (taskId && (status === "succeeded" || status === "failed")) {
+      try {
+        const project = await getVideoProjectByRequestId(`kling:${taskId}`);
+        if (project) await refreshFalRender(project.userId, project);
+      } catch (error) {
+        console.warn("[KlingWebhook] refresh failed for task", taskId, error);
+      }
+    }
+    res.status(200).send("ok");
+  });
+}

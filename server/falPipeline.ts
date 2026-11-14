@@ -13,6 +13,7 @@ import { ENV } from "./_core/env";
 import { clipCost } from "../shared/billing";
 import { getProjectRenderStatus, type RenderStatusSnapshot } from "./renderPipeline";
 import { storageGetSignedUrl } from "./storage";
+import { getKlingTasks, isKlingConfigured, KlingError, KLING_PREFIX, submitKlingClip, type KlingTask } from "./klingApi";
 import { claimRenderLock, getVideoProject, grantCredits, releaseRenderLock, spendCredits, updateVideoProject } from "./db";
 
 // Clip length is now per-photo (project.clipDurations), so any prompt text that names the
@@ -183,6 +184,7 @@ function getFalClient() {
 // The webhook handler treats this purely as a "go re-check now" hint (see server/_core/webhooks.ts);
 // it never trusts the webhook body itself, so this URL doesn't need to be a secret.
 const FAL_WEBHOOK_URL = `${ENV.publicUrl.replace(/\/+$/, "")}/api/webhooks/fal`;
+const KLING_WEBHOOK_URL = `${ENV.publicUrl.replace(/\/+$/, "")}/api/webhooks/kling`;
 
 function propertyContext(project: VideoProject) {
   return [project.title, project.location, project.description].filter(Boolean).join(". ") || "high-end property listing";
@@ -287,7 +289,18 @@ export function effectivePrompt(index: number, project: VideoProject, generatedP
   return customPrompt(project, index) || generatedPrompts[index] || fallbackPrompt(index, project);
 }
 
+/** Which service renders clips: Kling's own API when its key is configured, otherwise fal.ai. */
+export function videoProvider(): "kling" | "fal" {
+  return isKlingConfigured() ? "kling" : "fal";
+}
+
 async function submitVideoJob(client: typeof fal, imageUrl: string, index: number, project: VideoProject, prompt: string) {
+  if (videoProvider() === "kling") {
+    // Kling's API has no separate negative prompt; the guided prompt already states its own
+    // "do not" rules inline, and a customer's own prompt is sent untouched.
+    const taskId = await submitKlingClip({ imageUrl, prompt: limitPrompt(prompt), durationSeconds: clipDuration(project, index), callbackUrl: KLING_WEBHOOK_URL });
+    return `${KLING_PREFIX}${taskId}`;
+  }
   const response = await client.queue.submit(FAL_IMAGE_TO_VIDEO_MODEL, {
     input: {
       prompt: limitPrompt(prompt),
@@ -302,11 +315,55 @@ async function submitVideoJob(client: typeof fal, imageUrl: string, index: numbe
   return response.request_id;
 }
 
-// A 4xx from fal.ai (other than timeout/rate-limit) will never succeed on a later poll; anything
-// else -- network blips, 5xx -- is worth simply polling again.
-function isPermanentFalError(error: unknown) {
+// Will this error ever succeed on a later attempt? Kling says so explicitly (rate/concurrency
+// limits, 5xx). For fal.ai, a 4xx other than timeout/rate-limit never will; network blips and
+// 5xx are worth simply trying again.
+function isPermanentProviderError(error: unknown) {
+  if (error instanceof KlingError) return !error.transient;
   const status = (error as { status?: unknown } | null)?.status;
   return typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+function customerErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof KlingError) return error.customerMessage;
+  return describeFalError(error) || fallback;
+}
+
+/** Checks every in-flight clip, whichever provider it was submitted to. A clip missing from
+ *  the result (a transient lookup error) is simply still pending. */
+async function pollClips(client: typeof fal, requestIds: string[], projectId: number): Promise<Map<string, KlingTask>> {
+  const results = new Map<string, KlingTask>();
+  const klingIds = requestIds.filter(id => id.startsWith(KLING_PREFIX));
+  const falIds = requestIds.filter(id => !id.startsWith(KLING_PREFIX));
+
+  const kling = klingIds.length
+    ? getKlingTasks(klingIds.map(id => id.slice(KLING_PREFIX.length)))
+      .then(tasks => tasks.forEach((task, taskId) => results.set(`${KLING_PREFIX}${taskId}`, task)))
+      .catch(error => {
+        console.error(`[FalPipeline] Kling poll failed for project ${projectId}:`, error);
+        if (isPermanentProviderError(error)) klingIds.forEach(id => results.set(id, { state: "failed", url: null, message: customerErrorMessage(error, "This clip could not be rendered.") }));
+      })
+    : Promise.resolve();
+
+  const falPolls = falIds.map(async requestId => {
+    try {
+      const status = await client.queue.status(FAL_IMAGE_TO_VIDEO_MODEL, { requestId, logs: false });
+      const state = status.status as string;
+      if (state === "COMPLETED") {
+        const result = await client.queue.result(FAL_IMAGE_TO_VIDEO_MODEL, { requestId });
+        const url = normalizeClipUrl(result.data);
+        results.set(requestId, url ? { state: "done", url, message: null } : { state: "failed", url: null, message: "No video was returned." });
+      } else if (state === "FAILED") {
+        results.set(requestId, { state: "failed", url: null, message: null });
+      }
+    } catch (error) {
+      console.error(`[FalPipeline] video render poll failed for project ${projectId}, request ${requestId}:`, describeFalError(error));
+      if (isPermanentProviderError(error)) results.set(requestId, { state: "failed", url: null, message: describeFalError(error) || null });
+    }
+  });
+
+  await Promise.all([kling, ...falPolls]);
+  return results;
 }
 
 function asNumberArray(value: unknown, length: number) {
@@ -454,7 +511,7 @@ async function advanceRender(userId: number, project: VideoProject, accessToken?
         }
       } catch (error) {
         console.error(`[FalPipeline] vision prompt poll failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
-        if (isPermanentFalError(error)) generatedPrompts[index] = fallbackPrompt(index, project);
+        if (isPermanentProviderError(error)) generatedPrompts[index] = fallbackPrompt(index, project);
       }
     }));
 
@@ -471,45 +528,37 @@ async function advanceRender(userId: number, project: VideoProject, accessToken?
       .catch(error => console.error(`[FalPipeline] refund ${reference} failed for project ${project.id}:`, error)));
   };
 
-  // 2. First submission of every clip. A clip that can't even be submitted is refunded and
-  //    left retryable; the rest carry on.
-  const neverSubmitted = indices.every(index => !requestIds[index] && !clipUrls[index] && !clipErrors[index]);
-  if (neverSubmitted) {
+  // 2. Collect clips that are already rendering.
+  const inFlight = indices.filter(index => requestIds[index] && !clipUrls[index] && !clipErrors[index]);
+  if (inFlight.length) {
+    const results = await pollClips(client, inFlight.map(index => requestIds[index]!), project.id);
+    for (const index of inFlight) {
+      const requestId = requestIds[index]!;
+      const result = results.get(requestId);
+      if (result?.state === "done") clipUrls[index] = result.url;
+      else if (result?.state === "failed") failClip(index, result.message || `Photo ${index + 1} could not be rendered.`, `refund:${requestId}`);
+    }
+  }
+
+  // 3. Submit every clip that isn't rendering yet. This is a queue, not a one-shot: a provider
+  //    that is at its concurrency limit (Kling caps simultaneous tasks per account) leaves the
+  //    clip waiting, and the next poll or webhook tries it again. A clip the provider rejects
+  //    outright is refunded and left retryable; the rest carry on.
+  const waiting = indices.filter(index => !requestIds[index] && !clipUrls[index] && !clipErrors[index]);
+  if (waiting.length) {
     const signedImages = await getFalSourceUrls(project, accessToken);
-    const submitted = await Promise.allSettled(indices.map(index =>
-      submitVideoJob(client, signedImages[index], index, project, effectivePrompt(index, project, generatedPrompts))));
     const batch = Date.now();
-    submitted.forEach((result, index) => {
-      if (result.status === "fulfilled") {
-        requestIds[index] = result.value;
-      } else {
-        console.error(`[FalPipeline] video submit failed for project ${project.id}, photo ${index + 1}:`, describeFalError(result.reason));
-        failClip(index, describeFalError(result.reason) || `Photo ${index + 1} could not be sent for rendering.`, `refund:submit:${project.id}:${index}:${batch}`);
-      }
-    });
-    // Persist the paid request ids before anything else can go wrong.
-    await updateVideoProject(userId, project.id, { generatedPrompts, shotAnalysis, falRequestIds: requestIds, clipErrors, renderProgress: 15, renderPhase: "generating", renderError: null });
-  } else {
-    // 3. Collect finished clips.
-    await Promise.all(indices.map(async index => {
-      const requestId = requestIds[index];
-      if (!requestId || clipUrls[index] || clipErrors[index]) return;
+    await Promise.all(waiting.map(async index => {
       try {
-        const status = await client.queue.status(FAL_IMAGE_TO_VIDEO_MODEL, { requestId, logs: false });
-        const state = status.status as string;
-        if (state === "COMPLETED") {
-          const result = await client.queue.result(FAL_IMAGE_TO_VIDEO_MODEL, { requestId });
-          const url = normalizeClipUrl(result.data);
-          if (url) clipUrls[index] = url;
-          else failClip(index, `No video was returned for photo ${index + 1}.`, `refund:${requestId}`);
-        } else if (state === "FAILED") {
-          failClip(index, `Photo ${index + 1} could not be rendered.`, `refund:${requestId}`);
-        }
+        requestIds[index] = await submitVideoJob(client, signedImages[index], index, project, effectivePrompt(index, project, generatedPrompts));
       } catch (error) {
-        console.error(`[FalPipeline] video render poll failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
-        if (isPermanentFalError(error)) failClip(index, describeFalError(error) || `Photo ${index + 1} could not be rendered.`, `refund:${requestId}`);
+        if (!isPermanentProviderError(error)) return;
+        console.error(`[FalPipeline] video submit failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
+        failClip(index, customerErrorMessage(error, `Photo ${index + 1} could not be sent for rendering.`), `refund:submit:${project.id}:${index}:${batch}`);
       }
     }));
+    // Persist the paid request ids before anything else can go wrong.
+    await updateVideoProject(userId, project.id, { generatedPrompts, shotAnalysis, falRequestIds: requestIds, clipUrls, clipErrors, renderProgress: Math.max(15, project.renderProgress), renderPhase: "generating", renderError: null });
   }
   await Promise.all(refunds);
 
@@ -560,7 +609,7 @@ async function advanceRender(userId: number, project: VideoProject, accessToken?
     if (state === "FAILED") return assemblyFailed();
   } catch (error) {
     console.error(`[FalPipeline] assembly poll failed for project ${project.id}:`, describeFalError(error));
-    if (isPermanentFalError(error)) return assemblyFailed();
+    if (isPermanentProviderError(error)) return assemblyFailed();
   }
   return save({ ...base, renderProgress: 95, renderPhase: "assembly", renderError: null });
 }
@@ -628,7 +677,9 @@ export async function regenerateClip(
       requestIds[index] = await submitVideoJob(getFalClient(), imageUrl, index, next, effectivePrompt(index, next, generatedPrompts));
     } catch (error) {
       await grantCredits(userId, cost, "refund", `refund:${reference}`).catch(() => {});
-      throw new Error(describeFalError(error) || "This clip could not be sent for rendering.");
+      throw new Error(error instanceof KlingError && error.transient
+        ? "The video model is busy right now. Try again in a moment."
+        : customerErrorMessage(error, "This clip could not be sent for rendering."));
     }
 
     clipUrls[index] = null;

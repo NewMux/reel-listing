@@ -2,7 +2,7 @@ import express from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
-import { registerFalWebhook } from "./webhooks";
+import { registerFalWebhook, registerKlingWebhook } from "./webhooks";
 import { registerStripeWebhook } from "../billing";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -15,6 +15,7 @@ export function createApiApp() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   registerFalWebhook(app);
+  registerKlingWebhook(app);
   app.use(
     "/api/trpc",
     createExpressMiddleware({
