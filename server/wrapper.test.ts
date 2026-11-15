@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { VideoProject } from "../drizzle/schema";
 
 const state = vi.hoisted(() => {
@@ -50,7 +50,6 @@ import { refreshFalRender, regenerateClip } from "./falPipeline";
 import { invoiceMetadata, verifyStripeSignature } from "./billing";
 import { renderCost } from "../shared/billing";
 import { getProjectRenderStatus } from "./renderPipeline";
-import { ENV } from "./_core/env";
 
 function makeProject(overrides: Partial<VideoProject> = {}): VideoProject {
   return {
@@ -151,88 +150,6 @@ describe("render loop", () => {
     expect(state.credits).toBe(0);
     expect(state.project).toMatchObject({ status: "Processing", finalVideoUrl: null, customPrompts: ["slow push in", null] });
     expect(state.project.clipUrls).toEqual([null, "https://fal.media/two.mp4"]);
-  });
-});
-
-describe("rendering on Kling's own API", () => {
-  // A tiny fake of Kling's API: one concurrent task allowed, like a small resource pack.
-  let kling: { running: Set<string>; tasks: Record<string, any>; bodies: any[]; next: number; limit: number; submitError: { status: number; code: number; message: string } | null };
-  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-
-  beforeEach(() => {
-    ENV.klingApiKey = "kling-test-key";
-    kling = { running: new Set(), tasks: {}, bodies: [], next: 1, limit: 1, submitError: null };
-    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-      expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer kling-test-key");
-      const { pathname, searchParams } = new URL(url);
-      if (init?.method === "POST" && pathname === "/image-to-video/kling-3.0") {
-        if (kling.submitError) return json(kling.submitError.status, { code: kling.submitError.code, message: kling.submitError.message });
-        if (kling.running.size >= kling.limit) return json(429, { code: 1303, message: "parallel task over resource pack limit" });
-        const id = `task-${kling.next++}`;
-        kling.bodies.push(JSON.parse(String(init.body)));
-        kling.running.add(id);
-        kling.tasks[id] = { id, status: "processing" };
-        return json(200, { code: 0, message: "ok", data: { id, status: "submitted" } });
-      }
-      if (pathname === "/tasks") {
-        return json(200, { code: 0, message: "ok", data: (searchParams.get("task_ids") || "").split(",").map(id => kling.tasks[id]).filter(Boolean) });
-      }
-      return json(404, { code: 1202, message: "not found" });
-    });
-  });
-
-  afterEach(() => {
-    ENV.klingApiKey = "";
-    vi.unstubAllGlobals();
-  });
-
-  const succeed = (id: string, url: string) => {
-    kling.running.delete(id);
-    kling.tasks[id] = { id, status: "succeeded", outputs: [{ type: "video", url }] };
-  };
-
-  it("queues clips past the account's concurrency limit and submits them as slots free up", async () => {
-    let snapshot = await refreshFalRender(1, state.project);
-    // Exactly one clip got a slot; the other waits, un-failed and un-refunded.
-    expect(state.project.falRequestIds.filter(Boolean)).toEqual(["kling:task-1"]);
-    expect(snapshot.phase).toBe("generating");
-    expect(state.project.clipErrors.filter(Boolean)).toHaveLength(0);
-    expect(state.credits).toBe(0);
-    expect(kling.bodies[0]).toMatchObject({
-      contents: [{ type: "prompt" }, { type: "first_frame" }],
-      settings: { duration: 10, audio: "off", multi_shot: false, resolution: "1080p" },
-      options: { callback_url: "https://reel-listing.com/api/webhooks/kling" },
-    });
-
-    await refreshFalRender(1, state.project);
-    expect(kling.next).toBe(2);
-
-    succeed("task-1", "https://kling.example/one.mp4");
-    await refreshFalRender(1, state.project);
-    expect(state.project.clipUrls.filter(Boolean)).toEqual(["https://kling.example/one.mp4"]);
-    expect(state.project.falRequestIds.filter(Boolean)).toHaveLength(2);
-
-    succeed("task-2", "https://kling.example/two.mp4");
-    snapshot = await refreshFalRender(1, state.project);
-    expect(snapshot.phase).toBe("assembly");
-    expect(state.jobs["job-1"].input.video_urls).toEqual(state.project.clipUrls);
-  });
-
-  it("refunds a clip Kling fails, and one it refuses, without leaking account details", async () => {
-    kling.limit = 2;
-    await refreshFalRender(1, state.project);
-    kling.tasks["task-1"] = { id: "task-1", status: "failed", message: "risk control" };
-    succeed("task-2", "https://kling.example/two.mp4");
-    const snapshot = await refreshFalRender(1, state.project);
-    expect(snapshot.phase).toBe("failed");
-    expect(snapshot.shots[0]).toMatchObject({ state: "failed", error: "risk control" });
-    expect(state.credits).toBe(10);
-
-    state.project = makeProject();
-    kling.submitError = { status: 429, code: 1102, message: "Resource pack exhausted" };
-    await refreshFalRender(1, state.project);
-    expect(state.project.clipErrors).toEqual(Array(2).fill("Rendering is temporarily unavailable. Please try again shortly."));
-    expect(state.credits).toBe(30);
   });
 });
 

@@ -28,7 +28,7 @@ import {
 import { signStoredUrl, storageCreatePutTarget, storageGetSignedUrl } from "./storage";
 import { appendUploadChunk, createUploadSession, finalizeUploadSession } from "./uploadSessions";
 import { getProjectRenderStatus, getShotPlan } from "./renderPipeline";
-import { buildCinematicPrompt, InsufficientCreditsError, refreshFalRender, refreshShotClassification, regenerateClip, submitFalRender, submitShotClassification, videoProvider } from "./falPipeline";
+import { buildCinematicPrompt, InsufficientCreditsError, refreshFalRender, refreshShotClassification, regenerateClip, submitFalRender, submitShotClassification } from "./falPipeline";
 import { createCheckoutSession } from "./billing";
 import { PLAN_IDS, renderCost } from "../shared/billing";
 import { FAL_CLIP_SECONDS, FAL_PROMPT_MAX_CHARS } from "../shared/video";
@@ -150,10 +150,6 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         try {
           validateUploadedPropertyMedia(input.files);
-          // Kling's own API only accepts JPG and PNG first frames.
-          if (videoProvider() === "kling" && input.files.some(file => file.type === "image/webp")) {
-            throw new Error("Use JPG or PNG photos. WEBP is not supported by the video model.");
-          }
           if (input.files.some(file => !file.key.startsWith(`property-projects/${ctx.user.id}/`))) {
             throw new Error("Property media must be uploaded by this account before creating a project.");
           }
