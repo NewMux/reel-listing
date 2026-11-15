@@ -2,7 +2,7 @@
 -- assembly, and public share links.
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "credits" integer NOT NULL DEFAULT 30;
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "plan" varchar(32);
-ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "stripeCustomerId" varchar(64);
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "paddleCustomerId" varchar(64);
 
 CREATE TABLE IF NOT EXISTS "credit_ledger" (
   "id" serial PRIMARY KEY,

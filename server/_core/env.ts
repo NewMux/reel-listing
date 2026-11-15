@@ -14,12 +14,15 @@ export const ENV = {
   // render to keep going from a webhook after the customer closes the tab, and for public
   // share pages of reels kept in Storage.
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
-  stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
-  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
-  stripePrices: {
-    starter: process.env.STRIPE_PRICE_STARTER ?? "",
-    pro: process.env.STRIPE_PRICE_PRO ?? "",
-    agency: process.env.STRIPE_PRICE_AGENCY ?? "",
+  // Paddle Billing. The client-side token is public; it is handed to the browser per checkout.
+  paddleApiKey: process.env.PADDLE_API_KEY ?? "",
+  paddleClientToken: process.env.PADDLE_CLIENT_TOKEN ?? "",
+  paddleWebhookSecret: process.env.PADDLE_WEBHOOK_SECRET ?? "",
+  paddleEnvironment: (process.env.PADDLE_ENVIRONMENT === "sandbox" ? "sandbox" : "production") as "sandbox" | "production",
+  paddlePrices: {
+    starter: process.env.PADDLE_PRICE_STARTER ?? "",
+    pro: process.env.PADDLE_PRICE_PRO ?? "",
+    agency: process.env.PADDLE_PRICE_AGENCY ?? "",
   },
   // The stable production domain, used to build callback URLs (e.g. fal.ai webhooks) that
   // must keep working across redeploys -- deliberately not derived from Vercel's per-deployment URL.

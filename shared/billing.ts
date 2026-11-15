@@ -8,7 +8,7 @@ export const FREE_TRIAL_CREDITS = 30;
 export const PLAN_IDS = ["starter", "pro", "agency"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
-/** Credits granted each paid billing period. Prices live in Stripe (STRIPE_PRICE_* env vars);
+/** Credits granted each paid billing period. Prices live in Paddle (PADDLE_PRICE_* env vars);
  *  the displayed price strings live in the locale copy. Unused credits roll over. */
 export const PLAN_CREDITS: Record<PlanId, number> = {
   starter: 300,

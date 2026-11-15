@@ -495,7 +495,7 @@ export const appRouter = router({
   billing: router({
     checkout: protectedProcedure.input(z.object({ plan: z.enum(PLAN_IDS) })).mutation(async ({ ctx, input }) => {
       try {
-        return { url: await createCheckoutSession(ctx.user, input.plan) };
+        return await createCheckoutSession(ctx.user, input.plan);
       } catch (error) {
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Checkout could not be started." });
       }

@@ -100,7 +100,7 @@ export async function getUserById(userId: number) {
   return result[0];
 }
 
-export async function updateUserBilling(userId: number, updates: { plan?: string | null; stripeCustomerId?: string | null }) {
+export async function updateUserBilling(userId: number, updates: { plan?: string | null; paddleCustomerId?: string | null }) {
   const db = await getDb();
   if (!db) return;
   await db.update(users).set({ ...updates, updatedAt: new Date() }).where(eq(users.id, userId));

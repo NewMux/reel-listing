@@ -4,7 +4,10 @@ import type { VideoProject } from "../drizzle/schema";
 
 const state = vi.hoisted(() => {
   process.env.FAL_KEY = "test-key";
+  process.env.PADDLE_API_KEY = "pdl_test";
+  process.env.PADDLE_PRICE_PRO = "pri_pro";
   return {
+    billing: [] as Array<{ userId: number; updates: object }>,
     project: null as any,
     credits: 0,
     references: new Set<string>(),
@@ -17,6 +20,8 @@ vi.mock("./db", () => ({
   claimRenderLock: async () => true,
   releaseRenderLock: async () => {},
   getVideoProject: async () => state.project,
+  getUserById: async (userId: number) => (userId === 4 ? { id: 4 } : undefined),
+  updateUserBilling: async (userId: number, updates: object) => { state.billing.push({ userId, updates }); },
   updateVideoProject: async (_userId: number, _id: number, updates: object) => Object.assign(state.project, updates),
   grantCredits: async (_userId: number, amount: number, _reason: string, reference: string) => {
     if (state.references.has(reference)) return false;
@@ -47,7 +52,7 @@ vi.mock("@fal-ai/client", () => ({
 }));
 
 import { refreshFalRender, regenerateClip } from "./falPipeline";
-import { invoiceMetadata, verifyStripeSignature } from "./billing";
+import { handlePaddleEvent, planFromTransaction, verifyPaddleSignature } from "./billing";
 import { renderCost } from "../shared/billing";
 import { getProjectRenderStatus } from "./renderPipeline";
 
@@ -158,22 +163,36 @@ describe("billing", () => {
     expect(renderCost([10, 10, 5])).toBe(25);
   });
 
-  it("accepts only a correctly signed, recent Stripe payload", () => {
-    const secret = "whsec_test";
-    const body = JSON.stringify({ type: "invoice.paid" });
+  it("accepts only a correctly signed, recent Paddle payload", () => {
+    const secret = "pdl_ntfset_test";
+    const body = JSON.stringify({ event_type: "transaction.completed" });
     const now = 1_800_000_000;
-    const sign = (payload: string, t: number) => `t=${t},v1=${createHmac("sha256", secret).update(`${t}.${payload}`).digest("hex")}`;
-    expect(verifyStripeSignature(body, sign(body, now), secret, now)).toBe(true);
-    expect(verifyStripeSignature(`${body} `, sign(body, now), secret, now)).toBe(false);
-    expect(verifyStripeSignature(body, sign(body, now - 3_600), secret, now)).toBe(false);
-    expect(verifyStripeSignature(body, undefined, secret, now)).toBe(false);
+    const sign = (payload: string, ts: number) => `ts=${ts};h1=${createHmac("sha256", secret).update(`${ts}:${payload}`).digest("hex")}`;
+    expect(verifyPaddleSignature(body, sign(body, now), secret, now)).toBe(true);
+    expect(verifyPaddleSignature(body, `ts=${now};h1=deadbeef;h1=${sign(body, now).split("h1=")[1]}`, secret, now)).toBe(true);
+    expect(verifyPaddleSignature(`${body} `, sign(body, now), secret, now)).toBe(false);
+    expect(verifyPaddleSignature(body, sign(body, now - 3_600), secret, now)).toBe(false);
+    expect(verifyPaddleSignature(body, undefined, secret, now)).toBe(false);
   });
 
-  it("finds plan metadata wherever the Stripe API version puts it", () => {
-    const metadata = { userId: "4", plan: "pro" };
-    expect(invoiceMetadata({ parent: { subscription_details: { metadata } } })).toEqual(metadata);
-    expect(invoiceMetadata({ subscription_details: { metadata } })).toEqual(metadata);
-    expect(invoiceMetadata({ lines: { data: [{ metadata }] } })).toEqual(metadata);
-    expect(invoiceMetadata({ lines: { data: [{ metadata: {} }] } })).toBeUndefined();
+  it("reads the plan from the price paid, not from custom data", () => {
+    expect(planFromTransaction({ items: [{ price: { id: "pri_pro" } }], custom_data: { plan: "agency" } })).toBe("pro");
+    expect(planFromTransaction({ items: [{ price: { id: "pri_other" } }], custom_data: { plan: "pro" } })).toBeNull();
+  });
+
+  it("grants credits once per completed transaction, including renewals without custom data", async () => {
+    state.credits = 0;
+    state.billing = [];
+    const checkout = { event_type: "transaction.completed", data: { id: "txn_1", customer_id: "ctm_1", items: [{ price: { id: "pri_pro" } }], custom_data: { userId: "4", plan: "pro" } } };
+    await handlePaddleEvent(checkout);
+    await handlePaddleEvent(checkout);
+    expect(state.credits).toBe(800);
+    expect(state.billing.at(-1)).toEqual({ userId: 4, updates: { plan: "pro", paddleCustomerId: "ctm_1" } });
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ data: { custom_data: { userId: "4" } } })));
+    await handlePaddleEvent({ event_type: "transaction.completed", data: { id: "txn_2", subscription_id: "sub_1", items: [{ price: { id: "pri_pro" } }], custom_data: null } });
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/subscriptions/sub_1"), expect.anything());
+    expect(state.credits).toBe(1600);
+    fetchMock.mockRestore();
   });
 });

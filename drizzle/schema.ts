@@ -18,7 +18,7 @@ export const users = pgTable("users", {
   // (shared/billing.ts); every change to this balance also writes a credit_ledger row.
   credits: integer("credits").default(30).notNull(),
   plan: varchar("plan", { length: 32 }),
-  stripeCustomerId: varchar("stripeCustomerId", { length: 64 }),
+  paddleCustomerId: varchar("paddleCustomerId", { length: 64 }),
   stagingCreditsRemaining: integer("stagingCreditsRemaining").default(0).notNull(),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),

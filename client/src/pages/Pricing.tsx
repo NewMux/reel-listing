@@ -5,6 +5,7 @@ import { Footer, PublicNav } from "@/components/AppChrome";
 import { copy, useLocale } from "@/lib/locale";
 import { wrapperCopy } from "@/lib/wrapperCopy";
 import { trpc } from "@/lib/trpc";
+import { openPaddleCheckout } from "@/lib/paddle";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
 import { PLAN_CREDITS, type PlanId } from "@shared/billing";
@@ -23,9 +24,13 @@ export default function Pricing() {
     if (!user) { startLogin(); return; }
     setPending(plan);
     try {
-      const { url } = await checkout.mutateAsync({ plan });
+      const session = await checkout.mutateAsync({ plan });
       toast.message(w.pricing.opening);
-      window.location.href = url;
+      await openPaddleCheckout({
+        ...session,
+        successUrl: `${window.location.origin}/dashboard?checkout=success`,
+        onClose: () => setPending(null),
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t.common.errorTitle);
       setPending(null);
