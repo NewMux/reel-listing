@@ -1,7 +1,7 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { and, desc, eq, gt, sql } from "drizzle-orm";
-import { contactMessages, InsertContactMessage, InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
+import { and, desc, eq, gt, gte, sql } from "drizzle-orm";
+import { contactMessages, creditLedger, InsertContactMessage, InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -55,23 +55,87 @@ export async function getUserByOpenId(openId: string) {
   return result[0];
 }
 
-/** Atomically decrements the user's included-video quota. Returns the new count, or null if they have none left. */
-export async function decrementVideoQuota(userId: number): Promise<number | null> {
+/**
+ * Spends credits atomically. Returns the new balance, or null when the account can't cover
+ * `amount` (nothing is deducted). `reference` must be unique per spend.
+ */
+export async function spendCredits(userId: number, amount: number, reason: string, reference: string): Promise<number | null> {
   const db = await getDb();
   if (!db) throw new Error("Account storage is temporarily unavailable.");
-  const result = await db
-    .update(users)
-    .set({ videosRemaining: sql`${users.videosRemaining} - 1` })
-    .where(and(eq(users.id, userId), gt(users.videosRemaining, 0)))
-    .returning({ videosRemaining: users.videosRemaining });
-  return result[0]?.videosRemaining ?? null;
+  return db.transaction(async tx => {
+    const result = await tx
+      .update(users)
+      .set({ credits: sql`${users.credits} - ${amount}` })
+      .where(and(eq(users.id, userId), gte(users.credits, amount)))
+      .returning({ credits: users.credits });
+    if (!result[0]) return null;
+    await tx.insert(creditLedger).values({ userId, delta: -amount, reason, reference });
+    return result[0].credits;
+  });
 }
 
-/** Refunds one video credit, used when a render fails to actually start after the quota was already spent. */
-export async function incrementVideoQuota(userId: number): Promise<void> {
+/**
+ * Adds credits (a purchase or a refund) exactly once per `reference`. Returns false when that
+ * reference was already applied -- a retried webhook or a poll racing a webhook is a no-op.
+ */
+export async function grantCredits(userId: number, amount: number, reason: string, reference: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) throw new Error("Account storage is temporarily unavailable.");
+  return db.transaction(async tx => {
+    const inserted = await tx
+      .insert(creditLedger)
+      .values({ userId, delta: amount, reason, reference })
+      .onConflictDoNothing({ target: creditLedger.reference })
+      .returning({ id: creditLedger.id });
+    if (!inserted[0]) return false;
+    await tx.update(users).set({ credits: sql`${users.credits} + ${amount}` }).where(eq(users.id, userId));
+    return true;
+  });
+}
+
+export async function getUserById(userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  return result[0];
+}
+
+export async function updateUserBilling(userId: number, updates: { plan?: string | null; paddleCustomerId?: string | null }) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ videosRemaining: sql`${users.videosRemaining} + 1` }).where(eq(users.id, userId));
+  await db.update(users).set({ ...updates, updatedAt: new Date() }).where(eq(users.id, userId));
+}
+
+/**
+ * Takes the per-project render mutex. Returns false if another request holds it. A lock older
+ * than 30s is treated as abandoned (functions here are capped at 10s), so a crashed request
+ * can never wedge a render.
+ */
+export async function claimRenderLock(projectId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) throw new Error("Project storage is temporarily unavailable.");
+  const result = await db
+    .update(videoProjects)
+    .set({ renderLockedAt: new Date() })
+    .where(and(
+      eq(videoProjects.id, projectId),
+      sql`(${videoProjects.renderLockedAt} IS NULL OR ${videoProjects.renderLockedAt} < now() - interval '30 seconds')`,
+    ))
+    .returning({ id: videoProjects.id });
+  return result.length > 0;
+}
+
+export async function releaseRenderLock(projectId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(videoProjects).set({ renderLockedAt: null }).where(eq(videoProjects.id, projectId));
+}
+
+export async function getVideoProjectByShareToken(token: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(videoProjects).where(eq(videoProjects.shareToken, token)).limit(1);
+  return result[0];
 }
 
 /** Atomically decrements the user's virtual-staging credit balance. Returns the new count, or null if they have none left. */
@@ -121,7 +185,7 @@ export async function getVideoProjectByRequestId(requestId: string) {
     .where(
       and(
         eq(videoProjects.status, "Processing"),
-        sql`(${videoProjects.promptRequestIds} @> ${idJson}::jsonb OR ${videoProjects.falRequestIds} @> ${idJson}::jsonb)`,
+        sql`(${videoProjects.promptRequestIds} @> ${idJson}::jsonb OR ${videoProjects.falRequestIds} @> ${idJson}::jsonb OR ${videoProjects.assemblyRequestId} = ${requestId})`,
       ),
     )
     .limit(1);
@@ -144,7 +208,7 @@ export async function insertContactMessage(entry: InsertContactMessage) {
 export async function updateVideoProject(
   userId: number,
   projectId: number,
-  updates: Partial<Pick<InsertVideoProject, "status" | "revisionNotes" | "finalVideoUrl" | "promptRequestIds" | "generatedPrompts" | "shotAnalysis" | "customCameraMoves" | "clipDurations" | "falRequestIds" | "clipUrls" | "renderProgress" | "renderPhase" | "renderError" | "mediaUrls" | "mediaKeys" | "mediaNames" | "mediaTypes">>,
+  updates: Partial<Pick<InsertVideoProject, "status" | "revisionNotes" | "finalVideoUrl" | "promptRequestIds" | "generatedPrompts" | "shotAnalysis" | "customCameraMoves" | "clipDurations" | "customPrompts" | "clipErrors" | "assemblyRequestId" | "shareToken" | "falRequestIds" | "clipUrls" | "renderProgress" | "renderPhase" | "renderError" | "mediaUrls" | "mediaKeys" | "mediaNames" | "mediaTypes">>,
 ) {
   const db = await getDb();
   if (!db) throw new Error("Project storage is temporarily unavailable.");

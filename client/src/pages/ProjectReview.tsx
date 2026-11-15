@@ -5,10 +5,15 @@ import { AppSidebar, StatusPill } from "@/components/AppChrome";
 import { copy, useLocale } from "@/lib/locale";
 import { trpc } from "@/lib/trpc";
 import { FAL_CLIP_SECONDS } from "@shared/video";
+import { renderCost } from "@shared/billing";
+import { wrapperCopy } from "@/lib/wrapperCopy";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 export default function ProjectReview() {
   const { locale, isRtl } = useLocale();
   const t = copy[locale];
+  const w = wrapperCopy[locale];
+  const { user } = useAuth();
   const [, params] = useRoute("/projects/:id/review");
   const id = Number(params?.id);
   const [, setLocation] = useLocation();
@@ -25,6 +30,7 @@ export default function ProjectReview() {
     onSuccess: () => {
       utils.projects.get.invalidate({ id });
       utils.projects.list.invalidate();
+      utils.auth.me.invalidate();
       setLocation(`/projects/${id}`);
     },
     onError: err => setApproveError(err.message),
@@ -48,6 +54,20 @@ export default function ProjectReview() {
   // wipe out whatever the user is mid-typing.
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const seededRef = useRef<Set<number>>(new Set());
+  // "My own prompt" mode per photo: the customer writes the full prompt, sent as-is.
+  const [ownMode, setOwnMode] = useState<Record<number, boolean>>({});
+  const [ownDrafts, setOwnDrafts] = useState<Record<number, string>>({});
+  const ownSeededRef = useRef(false);
+  useEffect(() => {
+    const customPrompts = shotDirections.data?.customPrompts;
+    if (!customPrompts || ownSeededRef.current) return;
+    ownSeededRef.current = true;
+    const modes: Record<number, boolean> = {};
+    const texts: Record<number, string> = {};
+    customPrompts.forEach((prompt, index) => { if (prompt) { modes[index] = true; texts[index] = prompt; } });
+    setOwnMode(modes);
+    setOwnDrafts(texts);
+  }, [shotDirections.data]);
   useEffect(() => {
     const shotAnalysis = shotDirections.data?.shotAnalysis;
     const customCameraMoves = shotDirections.data?.customCameraMoves;
@@ -70,6 +90,8 @@ export default function ProjectReview() {
   const clipCount = data.mediaUrls.length;
   const durations = data.mediaUrls.map((_, index) => shotDirections.data?.clipDurations?.[index] || FAL_CLIP_SECONDS);
   const duration = durations.reduce((sum, seconds) => sum + seconds, 0);
+  const cost = renderCost(durations);
+  const balance = user?.credits ?? 0;
   const eachLabel = durations.every(seconds => seconds === durations[0]) ? `${durations[0]}s` : "5–10s";
   const canReorder = data.status === "Review";
   const moveShot = (index: number, direction: -1 | 1) => {
@@ -118,6 +140,7 @@ export default function ProjectReview() {
                   const hasOverride = !!shotDirections.data?.customCameraMoves?.[index];
                   const analysisReady = !!shotDirections.data?.shotAnalysis?.[index];
                   const activeDuration = shotDirections.data?.clipDurations?.[index] || 10;
+                  const isOwn = !!ownMode[index];
                   return (
                     <div key={index} className="rounded-xl bg-white p-3">
                       <div className="flex items-center gap-2">
@@ -136,7 +159,34 @@ export default function ProjectReview() {
                           ))}
                         </div>
                       </div>
-                      <textarea
+                      <div className="mt-2 flex gap-1">
+                        {([false, true] as const).map(own => (
+                          <button
+                            key={String(own)}
+                            type="button"
+                            disabled={!canReorder}
+                            onClick={() => {
+                              setOwnMode(prev => ({ ...prev, [index]: own }));
+                              // Switching back to guided drops the customer's prompt for this photo.
+                              if (!own && shotDirections.data?.customPrompts?.[index]) updateShotOverride.mutate({ id, index, customPrompt: null });
+                            }}
+                            className={`h-7 rounded-full px-2.5 text-[10px] font-bold transition ${isOwn === own ? "bg-[#251811] text-white" : "bg-[#F3EBE7] text-[#795E4E] hover:bg-[#EADFD9]"} disabled:opacity-50`}
+                          >{own ? w.review.ownPrompt : w.review.guided}</button>
+                        ))}
+                      </div>
+                      {isOwn ? <>
+                        <textarea
+                          value={ownDrafts[index] ?? ""}
+                          onChange={event => setOwnDrafts(prev => ({ ...prev, [index]: event.target.value }))}
+                          onBlur={() => updateShotOverride.mutate({ id, index, customPrompt: (ownDrafts[index] ?? "").trim() || null })}
+                          disabled={!canReorder}
+                          placeholder={w.review.ownPromptPlaceholder}
+                          rows={4}
+                          maxLength={2300}
+                          className="mt-2 w-full resize-none rounded-lg border border-[#251811]/8 bg-[#FAF8F7] p-2 text-xs leading-5 text-[#604E44] outline-none placeholder:text-[#A49E9A] disabled:opacity-60"
+                        />
+                        <p className="mt-1 text-[10px] font-medium text-[#948D89]">{w.review.ownPromptHint}</p>
+                      </> : <textarea
                         value={drafts[index] ?? ""}
                         onChange={event => setDrafts(prev => ({ ...prev, [index]: event.target.value }))}
                         onBlur={() => updateShotOverride.mutate({ id, index, cameraMove: (drafts[index] ?? "").trim() || null })}
@@ -144,8 +194,8 @@ export default function ProjectReview() {
                         placeholder={analysisReady ? t.review.cameraMovePlaceholder : t.review.analyzing}
                         rows={2}
                         className="mt-2 w-full resize-none rounded-lg border border-[#251811]/8 bg-[#FAF8F7] p-2 text-xs leading-5 text-[#604E44] outline-none placeholder:text-[#A49E9A] disabled:opacity-60"
-                      />
-                      {hasOverride && canReorder && (
+                      />}
+                      {hasOverride && canReorder && !isOwn && (
                         <button
                           type="button"
                           onClick={() => {
@@ -166,7 +216,8 @@ export default function ProjectReview() {
 
             {data.status === "Review" ? <>
               {approveError && <p className="mt-5 flex gap-2 rounded-xl bg-[#FFEFE5] px-3 py-2.5 text-xs font-medium leading-5 text-[#94522C]"><AlertCircle size={15} className="shrink-0" />{approveError}</p>}
-              <button disabled={approve.isPending} onClick={() => { setApproveError(""); approve.mutate({ id }); }} className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white transition hover:bg-[#402E24] disabled:opacity-70">{approve.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{approve.isPending ? t.review.preparing : t.review.approve}</button>
+              <p className={`mt-6 rounded-xl px-3 py-2.5 text-xs font-semibold leading-5 ${balance < cost ? "bg-[#FFEFE5] text-[#94522C]" : "bg-[#F3EDE9] text-[#6D584C]"}`}>{w.review.cost} {cost} {w.credits} ({w.creditRule}). {w.review.balance} {balance.toLocaleString("en-US")}.{balance < cost && <> {w.review.notEnough} <button type="button" onClick={() => setLocation("/pricing")} className="font-bold underline">{w.addCredits}</button></>}</p>
+              <button disabled={approve.isPending || updateShotOverride.isPending || balance < cost} onClick={() => { setApproveError(""); approve.mutate({ id }); }} className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white transition hover:bg-[#402E24] disabled:opacity-70">{approve.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{approve.isPending ? t.review.preparing : t.review.approve}</button>
               <button onClick={() => setShowNotes(!showNotes)} className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#251811]/12 text-sm font-bold text-[#503F35] transition hover:bg-[#F6F2EF]"><MessageSquareText size={16} />{t.review.request}</button>
               {showNotes && <div className="mt-4 rounded-xl border border-[#251811]/10 bg-[#F8F4F1] p-3"><textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder={t.review.notePlace} rows={3} className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-[#A49E9A]" /><button disabled={notes.trim().length < 3 || request.isPending} onClick={() => request.mutate({ id, notes })} className="mt-3 h-9 w-full rounded-lg bg-[#E9C6B2] text-xs font-bold text-[#512E1A] disabled:opacity-50">{request.isPending ? t.common.loading : t.review.send}</button></div>}
             </> : <button onClick={() => setLocation(`/projects/${id}`)} className="mt-6 flex h-12 w-full items-center justify-center rounded-xl bg-[#251811] text-sm font-bold text-white">{t.review.viewProduction}</button>}

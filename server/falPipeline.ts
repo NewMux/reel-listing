@@ -4,14 +4,16 @@ import {
   FAL_CLIP_SECONDS,
   FAL_GENERATE_AUDIO,
   FAL_IMAGE_TO_VIDEO_MODEL,
+  FAL_MERGE_VIDEOS_MODEL,
   FAL_PROMPT_MAX_CHARS,
   FAL_VISION_LLM_MODEL,
   FAL_VISION_PROMPT_MODEL,
 } from "../shared/video";
 import { ENV } from "./_core/env";
+import { clipCost } from "../shared/billing";
 import { getProjectRenderStatus, type RenderStatusSnapshot } from "./renderPipeline";
 import { storageGetSignedUrl } from "./storage";
-import { updateVideoProject } from "./db";
+import { claimRenderLock, getVideoProject, grantCredits, releaseRenderLock, spendCredits, updateVideoProject } from "./db";
 
 // Clip length is now per-photo (project.clipDurations), so any prompt text that names the
 // duration has to be built per-index instead of being a flat constant.
@@ -268,19 +270,48 @@ async function submitVisionPromptJobs(client: typeof fal, signedImages: string[]
   return responses.map(response => response.request_id);
 }
 
-async function submitVideoJobs(client: typeof fal, signedImages: string[], prompts: string[], project: VideoProject) {
-  const responses = await Promise.all(signedImages.map((imageUrl, index) => client.queue.submit(FAL_IMAGE_TO_VIDEO_MODEL, {
+// Guardrails for the guided real-estate prompt. Deliberately NOT applied to a customer's own
+// prompt: it forbids exactly the things (people, object motion, lighting changes) a customer
+// writing their own direction may be asking for.
+const GUIDED_NEGATIVE_PROMPT = "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, generic left-to-right pan, slideshow motion, static frame, static camera, frozen camera, motionless camera, no camera movement, visual step change, object reveal, lighting change, before-and-after effect, artificial light bloom, door opening, door closing, window opening, window closing, curtains moving, blinds moving, cabinet opening, cabinet closing, objects animating independently, self-moving objects, subject leaving frame, camera drifting away from main subject, blur, distort, low quality, audio, voice, dialogue, music, people, animals, text, logo, watermark";
+const CUSTOM_NEGATIVE_PROMPT = "blur, low quality, compression artifacts, flicker, warped geometry, text, watermark";
+
+/** The customer's own full prompt for this photo, or null when they're using guided direction. */
+export function customPrompt(project: Pick<VideoProject, "customPrompts">, index: number) {
+  const value = project.customPrompts?.[index];
+  return typeof value === "string" && value.trim() ? limitPrompt(value) : null;
+}
+
+/** The prompt actually sent for one clip: the customer's own if set, otherwise guided direction. */
+export function effectivePrompt(index: number, project: VideoProject, generatedPrompts: (string | null)[]) {
+  return customPrompt(project, index) || generatedPrompts[index] || fallbackPrompt(index, project);
+}
+
+async function submitVideoJob(client: typeof fal, imageUrl: string, index: number, project: VideoProject, prompt: string) {
+  const response = await client.queue.submit(FAL_IMAGE_TO_VIDEO_MODEL, {
     input: {
-      prompt: limitPrompt(prompts[index]),
+      prompt: limitPrompt(prompt),
       start_image_url: imageUrl,
       duration: String(clipDuration(project, index)) as "5" | "10",
       generate_audio: FAL_GENERATE_AUDIO,
-      negative_prompt: "scene change, room change, invented architecture, new furniture, disappearing furniture, geometry drift, bending lines, warped perspective, lens wobble, snap zoom, whip pan, handheld shake, excessive motion, generic left-to-right pan, slideshow motion, static frame, static camera, frozen camera, motionless camera, no camera movement, visual step change, object reveal, lighting change, before-and-after effect, artificial light bloom, door opening, door closing, window opening, window closing, curtains moving, blinds moving, cabinet opening, cabinet closing, objects animating independently, self-moving objects, subject leaving frame, camera drifting away from main subject, blur, distort, low quality, audio, voice, dialogue, music, people, animals, text, logo, watermark",
+      negative_prompt: customPrompt(project, index) ? CUSTOM_NEGATIVE_PROMPT : GUIDED_NEGATIVE_PROMPT,
       cfg_scale: 0.6,
     },
     webhookUrl: FAL_WEBHOOK_URL,
-  })));
-  return responses.map(response => response.request_id);
+  });
+  return response.request_id;
+}
+
+// A 4xx from fal.ai (other than timeout/rate-limit) will never succeed on a later poll; anything
+// else -- network blips, 5xx -- is worth simply polling again.
+function isPermanentFalError(error: unknown) {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+function asNumberArray(value: unknown, length: number) {
+  if (!Array.isArray(value)) return Array.from({ length }, () => null as number | null);
+  return Array.from({ length }, (_, index) => typeof value[index] === "number" ? value[index] as number : null);
 }
 
 // Kicks off per-photo vision classification as soon as a project is created, well before the
@@ -345,44 +376,71 @@ export async function submitFalRender(userId: number, project: VideoProject, acc
     generatedPrompts = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
     shotAnalysis = Array.from({ length: project.mediaUrls.length }, () => null as ShotAnalysis | null);
   }
-  const emptyClips = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
+  const empty = Array.from({ length: project.mediaUrls.length }, () => null as string | null);
   const renderProgress = alreadyClassifying ? Math.round((generatedPrompts.filter(Boolean).length / project.mediaUrls.length) * 15) : 0;
-
-  await updateVideoProject(userId, project.id, {
+  const updates = {
     promptRequestIds,
     generatedPrompts,
     shotAnalysis,
-    falRequestIds: [],
-    clipUrls: emptyClips,
+    falRequestIds: [] as (string | null)[],
+    clipUrls: empty,
+    clipErrors: empty,
+    assemblyRequestId: null,
     renderProgress,
-    renderPhase: "generating",
+    renderPhase: "generating" as const,
     renderError: null,
-  });
+  };
 
-  return getProjectRenderStatus({
-    ...project,
-    status: "Processing",
-    promptRequestIds,
-    generatedPrompts,
-    shotAnalysis,
-    falRequestIds: [],
-    clipUrls: emptyClips,
-    renderProgress,
-    renderPhase: "generating",
-    renderError: null,
-  });
+  await updateVideoProject(userId, project.id, updates);
+  return getProjectRenderStatus({ ...project, status: "Processing", ...updates });
 }
 
-export async function refreshFalRender(userId: number, project: VideoProject, accessToken?: string | null): Promise<RenderStatusSnapshot> {
-  const promptRequestIds = asStringArray(project.promptRequestIds, project.mediaUrls.length);
-  const generatedPrompts = asStringArray(project.generatedPrompts, project.mediaUrls.length);
-  const shotAnalysis = asShotAnalysisArray(project.shotAnalysis, project.mediaUrls.length);
-  const client = getFalClient();
-  let failedMessage: string | null = null;
+/**
+ * Advances a render by one step: resolves direction, submits clips, collects finished clips
+ * (refunding any that failed), then assembles the final reel on fal.ai. Safe to call from
+ * both the client poll and the fal.ai webhook -- the per-project lock means only one caller
+ * advances at a time, and the other just gets the current snapshot.
+ */
+export async function refreshFalRender(userId: number, staleProject: VideoProject, accessToken?: string | null): Promise<RenderStatusSnapshot> {
+  if (!(await claimRenderLock(staleProject.id))) return getProjectRenderStatus(staleProject);
+  try {
+    // Re-read under the lock: the caller's copy may predate another request's writes.
+    const project = (await getVideoProject(userId, staleProject.id)) ?? staleProject;
+    if (project.status !== "Processing") return getProjectRenderStatus(project);
+    return await advanceRender(userId, project, accessToken);
+  } finally {
+    await releaseRenderLock(staleProject.id).catch(() => {});
+  }
+}
 
-  if (promptRequestIds.some(Boolean) && !allReady(generatedPrompts, project.mediaUrls.length)) {
-    await Promise.all(promptRequestIds.map(async (requestId, index) => {
-      if (!requestId || generatedPrompts[index]) return;
+type ProjectUpdates = Parameters<typeof updateVideoProject>[2];
+
+async function advanceRender(userId: number, project: VideoProject, accessToken?: string | null): Promise<RenderStatusSnapshot> {
+  // A failed render waits for the customer (retry a clip, or resume assembly) rather than
+  // silently re-spending on every poll.
+  if (project.renderPhase === "failed") return getProjectRenderStatus(project);
+
+  const total = project.mediaUrls.length;
+  const indices = Array.from({ length: total }, (_, index) => index);
+  const client = getFalClient();
+  const promptRequestIds = asStringArray(project.promptRequestIds, total);
+  const generatedPrompts = asStringArray(project.generatedPrompts, total);
+  const shotAnalysis = asShotAnalysisArray(project.shotAnalysis, total);
+  const requestIds = asStringArray(project.falRequestIds, total);
+  const clipUrls = asStringArray(project.clipUrls, total);
+  const clipErrors = asStringArray(project.clipErrors, total);
+
+  const save = async (updates: ProjectUpdates) => {
+    await updateVideoProject(userId, project.id, updates);
+    return getProjectRenderStatus({ ...project, ...updates } as VideoProject);
+  };
+
+  // 1. Direction. A photo with the customer's own prompt needs none; a vision job that fails
+  //    falls back to a generic guided prompt instead of failing the render.
+  const awaitingDirection = (index: number) => Boolean(promptRequestIds[index]) && !generatedPrompts[index] && !customPrompt(project, index);
+  if (indices.some(awaitingDirection)) {
+    await Promise.all(indices.filter(awaitingDirection).map(async index => {
+      const requestId = promptRequestIds[index]!;
       try {
         const status = await client.queue.status(FAL_VISION_PROMPT_MODEL, { requestId, logs: false });
         const state = status.status as string;
@@ -391,90 +449,208 @@ export async function refreshFalRender(userId: number, project: VideoProject, ac
           const direction = parseDirection(result.data, index);
           shotAnalysis[index] = direction;
           generatedPrompts[index] = buildCinematicPrompt(index, direction, project);
-          if (!generatedPrompts[index]) failedMessage = `fal.ai could not create direction for photo ${index + 1}.`;
         } else if (state === "FAILED") {
-          failedMessage = `fal.ai could not create direction for photo ${index + 1}.`;
+          generatedPrompts[index] = fallbackPrompt(index, project);
         }
       } catch (error) {
         console.error(`[FalPipeline] vision prompt poll failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
-        failedMessage = describeFalError(error) || `fal.ai could not create direction for photo ${index + 1}.`;
+        if (isPermanentFalError(error)) generatedPrompts[index] = fallbackPrompt(index, project);
       }
     }));
 
-    if (failedMessage) {
-      await updateVideoProject(userId, project.id, { generatedPrompts, shotAnalysis, renderProgress: Math.round((generatedPrompts.filter(Boolean).length / project.mediaUrls.length) * 15), renderPhase: "failed", renderError: failedMessage });
-      return getProjectRenderStatus({ ...project, promptRequestIds, generatedPrompts, shotAnalysis, renderProgress: 0, renderPhase: "failed", renderError: failedMessage });
-    }
-
-    if (!allReady(generatedPrompts, project.mediaUrls.length)) {
-      const progress = Math.round((generatedPrompts.filter(Boolean).length / project.mediaUrls.length) * 15);
-      await updateVideoProject(userId, project.id, { generatedPrompts, shotAnalysis, renderProgress: progress, renderPhase: "generating", renderError: null });
-      return getProjectRenderStatus({ ...project, promptRequestIds, generatedPrompts, shotAnalysis, renderProgress: progress, renderPhase: "generating", renderError: null });
+    if (indices.some(awaitingDirection)) {
+      const ready = indices.filter(index => generatedPrompts[index] || customPrompt(project, index)).length;
+      return save({ generatedPrompts, shotAnalysis, renderProgress: Math.round((ready / total) * 15), renderPhase: "generating", renderError: null });
     }
   }
 
-  const prompts = generatedPrompts.map((prompt, index) => prompt || fallbackPrompt(index, project));
-  let requestIds = asStringArray(project.falRequestIds, project.mediaUrls.length);
-  const clipUrls = asStringArray(project.clipUrls, project.mediaUrls.length);
+  const refunds: Promise<unknown>[] = [];
+  const failClip = (index: number, message: string, reference: string) => {
+    clipErrors[index] = message.slice(0, 300);
+    refunds.push(grantCredits(userId, clipCost(clipDuration(project, index)), "refund", reference)
+      .catch(error => console.error(`[FalPipeline] refund ${reference} failed for project ${project.id}:`, error)));
+  };
 
-  if (!allReady(requestIds, project.mediaUrls.length)) {
-    const signedImages = project.mediaKeys.length === project.mediaUrls.length
-      ? await getFalSourceUrls(project, accessToken)
-      : [];
-    if (!signedImages.length) throw new Error("Property images could not be prepared for fal.ai.");
-    requestIds = await submitVideoJobs(client, signedImages, prompts, project);
-    await updateVideoProject(userId, project.id, {
-      promptRequestIds,
-      generatedPrompts: prompts,
+  // 2. First submission of every clip. A clip that can't even be submitted is refunded and
+  //    left retryable; the rest carry on.
+  const neverSubmitted = indices.every(index => !requestIds[index] && !clipUrls[index] && !clipErrors[index]);
+  if (neverSubmitted) {
+    const signedImages = await getFalSourceUrls(project, accessToken);
+    const submitted = await Promise.allSettled(indices.map(index =>
+      submitVideoJob(client, signedImages[index], index, project, effectivePrompt(index, project, generatedPrompts))));
+    const batch = Date.now();
+    submitted.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        requestIds[index] = result.value;
+      } else {
+        console.error(`[FalPipeline] video submit failed for project ${project.id}, photo ${index + 1}:`, describeFalError(result.reason));
+        failClip(index, describeFalError(result.reason) || `Photo ${index + 1} could not be sent for rendering.`, `refund:submit:${project.id}:${index}:${batch}`);
+      }
+    });
+    // Persist the paid request ids before anything else can go wrong.
+    await updateVideoProject(userId, project.id, { generatedPrompts, shotAnalysis, falRequestIds: requestIds, clipErrors, renderProgress: 15, renderPhase: "generating", renderError: null });
+  } else {
+    // 3. Collect finished clips.
+    await Promise.all(indices.map(async index => {
+      const requestId = requestIds[index];
+      if (!requestId || clipUrls[index] || clipErrors[index]) return;
+      try {
+        const status = await client.queue.status(FAL_IMAGE_TO_VIDEO_MODEL, { requestId, logs: false });
+        const state = status.status as string;
+        if (state === "COMPLETED") {
+          const result = await client.queue.result(FAL_IMAGE_TO_VIDEO_MODEL, { requestId });
+          const url = normalizeClipUrl(result.data);
+          if (url) clipUrls[index] = url;
+          else failClip(index, `No video was returned for photo ${index + 1}.`, `refund:${requestId}`);
+        } else if (state === "FAILED") {
+          failClip(index, `Photo ${index + 1} could not be rendered.`, `refund:${requestId}`);
+        }
+      } catch (error) {
+        console.error(`[FalPipeline] video render poll failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
+        if (isPermanentFalError(error)) failClip(index, describeFalError(error) || `Photo ${index + 1} could not be rendered.`, `refund:${requestId}`);
+      }
+    }));
+  }
+  await Promise.all(refunds);
+
+  const done = clipUrls.filter(Boolean).length;
+  const failed = clipErrors.filter(Boolean).length;
+  const base = { generatedPrompts, shotAnalysis, falRequestIds: requestIds, clipUrls, clipErrors };
+  const clipProgress = 15 + Math.round((done / total) * 75);
+
+  if (done + failed < total) {
+    return save({ ...base, renderProgress: clipProgress, renderPhase: "generating", renderError: null });
+  }
+  if (failed > 0) {
+    return save({
+      ...base,
+      renderProgress: clipProgress,
+      renderPhase: "failed",
+      renderError: failed === 1
+        ? "1 clip could not be generated and its credits were refunded. Retry it to finish your reel."
+        : `${failed} clips could not be generated and their credits were refunded. Retry them to finish your reel.`,
+    });
+  }
+
+  // 4. Assembly, on fal.ai rather than in the customer's browser -- so the reel finishes even
+  //    if nobody is watching the page.
+  const finish = (finalVideoUrl: string) => save({ ...base, status: "Done", finalVideoUrl, renderProgress: 100, renderPhase: "complete", renderError: null });
+  const assemblyFailed = () => save({ ...base, assemblyRequestId: null, renderProgress: 95, renderPhase: "failed", renderError: "Your clips are ready, but the final reel could not be assembled. Try again -- assembly is free." });
+
+  if (total === 1) return finish(clipUrls[0]!);
+
+  if (!project.assemblyRequestId) {
+    const response = await client.queue.submit(FAL_MERGE_VIDEOS_MODEL as string, {
+      // Clips can differ in aspect ratio when the photos do; follow the opening clip rather
+      // than the default (smallest width x smallest height across all clips).
+      input: { video_urls: clipUrls, resolution_aspect_ratio_video_index: 0 },
+      webhookUrl: FAL_WEBHOOK_URL,
+    });
+    return save({ ...base, assemblyRequestId: response.request_id, renderProgress: 95, renderPhase: "assembly", renderError: null });
+  }
+
+  try {
+    const status = await client.queue.status(FAL_MERGE_VIDEOS_MODEL as string, { requestId: project.assemblyRequestId, logs: false });
+    const state = status.status as string;
+    if (state === "COMPLETED") {
+      const result = await client.queue.result(FAL_MERGE_VIDEOS_MODEL as string, { requestId: project.assemblyRequestId });
+      const url = normalizeClipUrl(result.data);
+      return url ? finish(url) : assemblyFailed();
+    }
+    if (state === "FAILED") return assemblyFailed();
+  } catch (error) {
+    console.error(`[FalPipeline] assembly poll failed for project ${project.id}:`, describeFalError(error));
+    if (isPermanentFalError(error)) return assemblyFailed();
+  }
+  return save({ ...base, renderProgress: 95, renderPhase: "assembly", renderError: null });
+}
+
+export class InsufficientCreditsError extends Error {
+  constructor(public readonly required: number) {
+    super(`Not enough credits: this needs ${required}.`);
+  }
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Re-rolls one clip -- to retry a failure, or because the customer wants a different take,
+ * prompt or length. Charges that clip's seconds, re-opens a finished project, and lets the
+ * normal render loop pick the new clip up and re-assemble the reel.
+ */
+export async function regenerateClip(
+  userId: number,
+  projectId: number,
+  index: number,
+  options: { prompt?: string | null; durationSeconds?: 5 | 10 },
+  accessToken?: string | null,
+) {
+  let locked = false;
+  for (let attempt = 0; attempt < 8 && !locked; attempt += 1) {
+    locked = await claimRenderLock(projectId);
+    if (!locked) await sleep(350);
+  }
+  if (!locked) throw new Error("This project is updating. Try again in a moment.");
+
+  try {
+    const project = await getVideoProject(userId, projectId);
+    if (!project) throw new Error("Project not found.");
+    if (project.status !== "Processing" && project.status !== "Done") {
+      throw new Error("Clips can be regenerated once production has started.");
+    }
+    const total = project.mediaUrls.length;
+    if (index >= total) throw new Error("Invalid photo.");
+
+    const requestIds = asStringArray(project.falRequestIds, total);
+    const clipUrls = asStringArray(project.clipUrls, total);
+    const clipErrors = asStringArray(project.clipErrors, total);
+    if (![...requestIds, ...clipUrls, ...clipErrors].some(Boolean)) throw new Error("Your clips are still being prepared.");
+    if (requestIds[index] && !clipUrls[index] && !clipErrors[index]) throw new Error("This clip is already rendering.");
+
+    const customPrompts = asStringArray(project.customPrompts, total);
+    const clipDurations = asNumberArray(project.clipDurations, total);
+    if (options.prompt !== undefined) customPrompts[index] = options.prompt?.trim() || null;
+    if (options.durationSeconds) clipDurations[index] = options.durationSeconds;
+    const next = { ...project, customPrompts, clipDurations } as VideoProject;
+
+    // Keep the stored guided prompt in step with a changed duration.
+    const generatedPrompts = asStringArray(project.generatedPrompts, total);
+    const analysis = project.shotAnalysis?.[index];
+    if (analysis) generatedPrompts[index] = buildCinematicPrompt(index, analysis, next);
+
+    const cost = clipCost(clipDuration(next, index));
+    const reference = `regen:${project.id}:${index}:${Date.now()}`;
+    if ((await spendCredits(userId, cost, "regenerate", reference)) === null) throw new InsufficientCreditsError(cost);
+
+    try {
+      const key = project.mediaKeys[index];
+      const imageUrl = key.startsWith("pilot:") ? project.mediaUrls[index] : await storageGetSignedUrl(key, accessToken ?? undefined);
+      requestIds[index] = await submitVideoJob(getFalClient(), imageUrl, index, next, effectivePrompt(index, next, generatedPrompts));
+    } catch (error) {
+      await grantCredits(userId, cost, "refund", `refund:${reference}`).catch(() => {});
+      throw new Error(describeFalError(error) || "This clip could not be sent for rendering.");
+    }
+
+    clipUrls[index] = null;
+    clipErrors[index] = null;
+    const done = clipUrls.filter(Boolean).length;
+    const updated = await updateVideoProject(userId, project.id, {
+      customPrompts,
+      clipDurations,
+      generatedPrompts,
       falRequestIds: requestIds,
       clipUrls,
-      renderProgress: 15,
+      clipErrors,
+      status: "Processing",
+      finalVideoUrl: null,
+      assemblyRequestId: null,
+      renderProgress: 15 + Math.round((done / total) * 75),
       renderPhase: "generating",
       renderError: null,
     });
-    return getProjectRenderStatus({ ...project, promptRequestIds, generatedPrompts: prompts, falRequestIds: requestIds, clipUrls, renderProgress: 15, renderPhase: "generating", renderError: null });
+    if (!updated) throw new Error("The project could not be updated.");
+    return updated;
+  } finally {
+    await releaseRenderLock(projectId).catch(() => {});
   }
-
-  await Promise.all(requestIds.map(async (requestId, index) => {
-    if (!requestId || clipUrls[index]) return;
-    try {
-      const status = await client.queue.status(FAL_IMAGE_TO_VIDEO_MODEL, { requestId, logs: false });
-      const state = status.status as string;
-      if (state === "COMPLETED") {
-        const result = await client.queue.result(FAL_IMAGE_TO_VIDEO_MODEL, { requestId });
-        clipUrls[index] = normalizeClipUrl(result.data);
-        if (!clipUrls[index]) failedMessage = `fal.ai returned no video for photo ${index + 1}.`;
-      } else if (state === "FAILED") {
-        failedMessage = `fal.ai could not render photo ${index + 1}.`;
-      }
-    } catch (error) {
-      console.error(`[FalPipeline] video render poll failed for project ${project.id}, photo ${index + 1}:`, describeFalError(error));
-      failedMessage = describeFalError(error) || `fal.ai could not render photo ${index + 1}.`;
-    }
-  }));
-
-  const completed = clipUrls.filter(Boolean).length;
-  const total = project.mediaUrls.length;
-  const renderPhase = failedMessage ? "failed" : completed === total ? "assembly" : "generating";
-  const renderProgress = renderPhase === "assembly" ? 95 : 15 + Math.round((completed / total) * 75);
-  await updateVideoProject(userId, project.id, {
-    promptRequestIds,
-    generatedPrompts: prompts,
-    falRequestIds: requestIds,
-    clipUrls,
-    renderProgress,
-    renderPhase,
-    renderError: failedMessage,
-  });
-
-  return getProjectRenderStatus({
-    ...project,
-    promptRequestIds,
-    generatedPrompts: prompts,
-    falRequestIds: requestIds,
-    clipUrls,
-    renderProgress,
-    renderPhase,
-    renderError: failedMessage,
-  });
 }

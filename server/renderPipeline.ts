@@ -13,6 +13,8 @@ export type Shot = {
   prompt: string;
   state: ShotState;
   clipUrl: string | null;
+  error: string | null;
+  isCustomPrompt: boolean;
 };
 
 export type RenderStatusSnapshot = {
@@ -28,6 +30,8 @@ export type RenderStatusSnapshot = {
   generatedPrompts: (string | null)[];
   clipUrls: (string | null)[];
   clipDurations: (number | null)[];
+  clipErrors: (string | null)[];
+  customPrompts: (string | null)[];
   shots: Shot[];
   error: string | null;
 };
@@ -78,18 +82,27 @@ function makeShots(
   requestIds: (string | null)[],
   phase: RenderStatusSnapshot["phase"],
   generatedPrompts: (string | null)[],
+  clipErrors: (string | null)[],
+  customPrompts: (string | null)[],
 ): Shot[] {
-  return getShotPlan(mediaUrls, generatedPrompts).map(shot => ({
-    ...shot,
-    state: clipUrls[shot.index] || phase === "complete"
+  return getShotPlan(mediaUrls, generatedPrompts).map(shot => {
+    const custom = customPrompts[shot.index]?.trim() || null;
+    const state: ShotState = clipUrls[shot.index] || phase === "complete"
       ? "complete"
-      : phase === "failed" && requestIds[shot.index]
+      : clipErrors[shot.index]
         ? "failed"
-        : phase === "generating" && requestIds[shot.index]
+        : requestIds[shot.index] && phase !== "review"
           ? "rendering"
-          : "queued",
-    clipUrl: clipUrls[shot.index] || null,
-  }));
+          : "queued";
+    return {
+      ...shot,
+      prompt: custom || shot.prompt,
+      state,
+      clipUrl: clipUrls[shot.index] || null,
+      error: clipErrors[shot.index] || null,
+      isCustomPrompt: Boolean(custom),
+    };
+  });
 }
 
 export function buildRenderSnapshot(input: {
@@ -102,6 +115,8 @@ export function buildRenderSnapshot(input: {
   falRequestIds?: (string | null)[] | null;
   clipUrls?: (string | null)[] | null;
   clipDurations?: (number | null)[] | null;
+  clipErrors?: (string | null)[] | null;
+  customPrompts?: (string | null)[] | null;
   renderProgress?: number | null;
   renderPhase?: RenderStatusSnapshot["phase"] | "idle" | null;
   renderError?: string | null;
@@ -111,6 +126,8 @@ export function buildRenderSnapshot(input: {
   const requestIds = input.falRequestIds || [];
   const clipUrls = input.clipUrls || [];
   const clipDurations = input.clipDurations || [];
+  const clipErrors = input.clipErrors || [];
+  const customPrompts = input.customPrompts || [];
   const totalShots = input.mediaUrls.length;
   const completedPrompts = generatedPrompts.filter(Boolean).length;
   const normalizedStatus = input.status === "Done" ? "Done" : input.status === "Processing" ? "Processing" : "Review";
@@ -131,7 +148,7 @@ export function buildRenderSnapshot(input: {
     : phase === "failed"
       ? input.renderError || "The cinematic render needs another try."
       : phase === "assembly"
-        ? "All clips are ready for final assembly."
+        ? "Joining your clips into the final reel…"
         : promptsPending
           ? completedPrompts > 0
             ? `Creating AI direction ${Math.min(completedPrompts + 1, totalShots)} of ${totalShots}…`
@@ -161,7 +178,9 @@ export function buildRenderSnapshot(input: {
     generatedPrompts,
     clipUrls,
     clipDurations,
-    shots: makeShots(input.mediaUrls, clipUrls, requestIds, phase, generatedPrompts),
+    clipErrors,
+    customPrompts,
+    shots: makeShots(input.mediaUrls, clipUrls, requestIds, phase, generatedPrompts, clipErrors, customPrompts),
     error: input.renderError || null,
   };
 }
@@ -193,6 +212,8 @@ export function getProjectRenderStatus(project: VideoProject) {
     falRequestIds: project.falRequestIds,
     clipUrls: project.clipUrls,
     clipDurations: project.clipDurations,
+    clipErrors: project.clipErrors,
+    customPrompts: project.customPrompts,
     renderProgress: project.renderProgress,
     renderPhase: project.renderPhase,
     renderError: project.renderError,

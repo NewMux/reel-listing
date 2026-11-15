@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, CheckCircle2, Clock3, Download, Film, Link2, Loader2, Share2, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft, ArrowRight, CheckCircle2, Clock3, Download, Film, Link2, Loader2, RefreshCw, Share2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation, useRoute } from "wouter";
 import { AppSidebar, StatusPill } from "@/components/AppChrome";
-import { stitchClips, type StitchProgress } from "@/lib/stitchVideos";
 import { copy, Locale, useLocale } from "@/lib/locale";
+import { wrapperCopy } from "@/lib/wrapperCopy";
 import { trpc } from "@/lib/trpc";
-import { withRetry } from "@shared/retry";
+import { clipCost } from "@shared/billing";
+import { FAL_CLIP_SECONDS } from "@shared/video";
 
 function estimate(status: string, locale: Locale) {
   const t = copy[locale].project;
@@ -16,23 +17,17 @@ function estimate(status: string, locale: Locale) {
   return t.uploadingEstimate;
 }
 
-function safeFileName(value: string) {
-  return value.trim().replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "reel-listing-film";
-}
-
 export default function ProjectDetail() {
   const { locale, isRtl } = useLocale();
   const t = copy[locale];
+  const w = wrapperCopy[locale];
   const [, params] = useRoute("/projects/:id");
   const id = Number(params?.id);
   const [, setLocation] = useLocation();
   const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
-  const [assemblyProgress, setAssemblyProgress] = useState<StitchProgress | null>(null);
-  const [localFinalVideoUrl, setLocalFinalVideoUrl] = useState<string | null>(null);
-  const [renderError, setRenderError] = useState<string | null>(null);
   const [sourceAspect, setSourceAspect] = useState<{ w: number; h: number } | null>(null);
-  const [failureStreak, setFailureStreak] = useState(0);
-  const assemblyRef = useRef(false);
+  // The clip whose re-roll editor is open, with its draft prompt and length.
+  const [editing, setEditing] = useState<{ index: number; prompt: string; seconds: 5 | 10 } | null>(null);
   const utils = trpc.useUtils();
   const project = trpc.projects.get.useQuery({ id }, { enabled: Number.isSafeInteger(id) });
   const render = trpc.projects.renderStatus.useQuery(
@@ -42,56 +37,28 @@ export default function ProjectDetail() {
       refetchInterval: project.data?.status === "Processing" ? 3_000 : false,
     },
   );
-  const createOutputTarget = trpc.media.createUploadTarget.useMutation();
-  const complete = trpc.projects.complete.useMutation({
-    onSuccess: () => {
+  const refreshAll = () => {
+    utils.projects.get.invalidate({ id });
+    utils.projects.list.invalidate();
+    utils.projects.renderStatus.invalidate({ id });
+    utils.auth.me.invalidate();
+  };
+  const regenerate = trpc.projects.regenerateClip.useMutation({
+    onSuccess: () => { setEditing(null); refreshAll(); },
+    onError: error => toast.error(error.message),
+  });
+  const resume = trpc.projects.resumeRender.useMutation({ onSuccess: refreshAll, onError: error => toast.error(error.message) });
+  const shareLink = trpc.projects.share.useMutation();
+  const unshare = trpc.projects.unshare.useMutation({ onSuccess: () => { utils.projects.get.invalidate({ id }); setDeliveryNotice(w.project.sharingStopped); } });
+
+  // The server finishes the reel on its own; when the poll sees it, pick up the Done project.
+  const renderDone = render.data?.status === "Done";
+  useEffect(() => {
+    if (renderDone && project.data?.status === "Processing") {
       utils.projects.get.invalidate({ id });
       utils.projects.list.invalidate();
-      utils.projects.renderStatus.invalidate({ id });
-    },
-  });
-
-  const assembleFinalReel = async () => {
-    const clipUrls = render.data?.clipUrls;
-    if (assemblyRef.current || !clipUrls?.length || clipUrls.some(url => !url) || render.data?.phase !== "assembly") return;
-    assemblyRef.current = true;
-    setRenderError(null);
-    setDeliveryNotice(null);
-    try {
-      const finalBlob = await stitchClips(clipUrls as string[], render.data?.clipDurations || [], progress => setAssemblyProgress(progress));
-      const target = await createOutputTarget.mutateAsync({ name: `${safeFileName(project.data?.title || "reel-listing-film")}.mp4`, type: "video/mp4" });
-      await withRetry(async () => {
-        const upload = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": "video/mp4" }, body: finalBlob });
-        if (!upload.ok) {
-          const providerMessage = (await upload.text().catch(() => "")).trim();
-          throw new Error(providerMessage ? `The final reel could not be saved (${upload.status}): ${providerMessage.slice(0, 240)}` : `The final reel could not be saved (${upload.status}).`);
-        }
-        return upload;
-      }, { label: "final reel upload" });
-      await complete.mutateAsync({ id, finalVideoUrl: target.url });
-      setLocalFinalVideoUrl(target.url);
-      setAssemblyProgress({ progress: 100, currentStep: t.project.reelReady });
-      setDeliveryNotice(t.project.reelReady);
-      toast.success(t.project.reelReady);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : t.project.assembleError;
-      setRenderError(message);
-      toast.error(message);
-    } finally {
-      assemblyRef.current = false;
     }
-  };
-
-  useEffect(() => {
-    if (render.data?.phase === "assembly" && !localFinalVideoUrl && !assemblyRef.current) void assembleFinalReel();
-  }, [render.data?.phase, render.data?.completedShots, localFinalVideoUrl]);
-
-  // A single "failed" poll is often just a transient hiccup that self-heals on the next
-  // poll (a fal.ai shot can be retried by simply polling again). Require it to persist
-  // across a couple of poll cycles before treating it as a real, user-facing failure.
-  useEffect(() => {
-    setFailureStreak(current => (render.data?.phase === "failed" ? current + 1 : 0));
-  }, [render.data?.phase, render.data?.completedShots]);
+  }, [renderDone, project.data?.status]);
 
   const firstSourceUrl = project.data?.mediaUrls[0];
   useEffect(() => {
@@ -108,23 +75,38 @@ export default function ProjectDetail() {
 
   const data = project.data;
   const renderStatus = render.data;
-  const displayStatus = localFinalVideoUrl || renderStatus?.status === "Done" || data.status === "Done" ? "Done" : data.status;
-  const finalVideoUrl = localFinalVideoUrl || renderStatus?.finalVideoUrl || data.finalVideoUrl;
-  const isFailed = failureStreak >= 2;
+  const displayStatus = data.status === "Processing" && renderDone ? "Done" : data.status;
+  const finalVideoUrl = renderStatus?.finalVideoUrl || data.finalVideoUrl;
+  const isFailed = displayStatus === "Processing" && renderStatus?.phase === "failed";
+  const failedClips = renderStatus?.shots.filter(shot => shot.state === "failed").length ?? 0;
   const canDeliver = displayStatus === "Done" && !!finalVideoUrl;
-  const progress = assemblyProgress?.progress ?? renderStatus?.overallProgress ?? 0;
+  const progress = renderStatus?.overallProgress ?? 0;
   const completedShots = renderStatus?.completedShots ?? 0;
   const shots = data.mediaUrls.map((sourceUrl, index) => {
     const persisted = renderStatus?.shots[index];
     const state = persisted?.state || (data.status === "Done" ? "complete" : "queued");
-    return { index, sourceUrl, roomType: persisted?.roomType || `${t.project.shotLabel} ${index + 1}`, prompt: persisted?.prompt || "AI direction will appear when generation begins.", state };
+    return {
+      index,
+      sourceUrl,
+      roomType: persisted?.roomType || `${t.project.shotLabel} ${index + 1}`,
+      prompt: persisted?.prompt || "AI direction will appear when generation begins.",
+      state,
+      clipUrl: persisted?.clipUrl || null,
+      error: persisted?.error || null,
+      customPrompt: persisted?.isCustomPrompt ? persisted.prompt : "",
+      seconds: ((renderStatus?.clipDurations?.[index] ?? FAL_CLIP_SECONDS) === 5 ? 5 : 10) as 5 | 10,
+    };
   });
+  const hasClips = shots.some(shot => shot.clipUrl || shot.state === "failed");
 
   const share = async () => {
+    if (!canDeliver) { toast.error(t.project.notReadyYet); return; }
     try {
-      await navigator.clipboard.writeText(window.location.href);
-      setDeliveryNotice(t.project.linkCopied);
-      toast.success(t.project.linkCopied);
+      const { token } = await shareLink.mutateAsync({ id });
+      await navigator.clipboard.writeText(`${window.location.origin}/r/${token}`);
+      utils.projects.get.invalidate({ id });
+      setDeliveryNotice(w.project.shareCopied);
+      toast.success(w.project.shareCopied);
     } catch {
       toast.error(t.project.shareError);
     }
@@ -140,8 +122,8 @@ export default function ProjectDetail() {
     window.setTimeout(() => { window.location.href = finalVideoUrl; }, 600);
   };
 
-  const isAssembling = renderStatus?.phase === "assembly" || assemblyProgress !== null;
-  const currentStep = assemblyProgress?.currentStep || renderStatus?.currentStep || t.project.startingProduction;
+  const isAssembling = renderStatus?.phase === "assembly";
+  const currentStep = renderStatus?.currentStep || t.project.startingProduction;
   const isPortrait = !!sourceAspect && sourceAspect.h > sourceAspect.w;
   const playerAspectStyle = sourceAspect ? { aspectRatio: `${sourceAspect.w} / ${sourceAspect.h}` } : undefined;
 
@@ -160,21 +142,59 @@ export default function ProjectDetail() {
               {canDeliver ? <video src={finalVideoUrl || undefined} controls className={`w-full bg-[#291910] ${sourceAspect ? "" : "aspect-video"}`} style={playerAspectStyle} /> : <div className={`grid place-items-center p-8 text-center ${sourceAspect ? "" : "aspect-video"}`} style={playerAspectStyle}><span className={`grid h-14 w-14 place-items-center rounded-full ${isFailed ? "bg-[#FFEFE5] text-[#94522C]" : displayStatus === "Processing" ? "bg-white text-[#6D4F3D]" : "bg-[#E1BBA5] text-[#754224]"}`}>{isFailed ? <span className="text-xl font-bold">!</span> : displayStatus === "Processing" ? <Loader2 className="animate-spin" size={23} /> : displayStatus === "Done" ? <CheckCircle2 size={24} /> : <Film size={24} />}</span><p className="mt-4 text-sm font-bold text-[#513D31]">{isFailed ? t.project.generationStopped : displayStatus === "Processing" ? (isAssembling ? t.project.assemblingReel : t.project.generatingClips) : estimate(displayStatus, locale)}</p><p className="mt-1 max-w-xs text-xs leading-5 text-[#7A6D65]">{isFailed ? (renderStatus?.error || t.project.renderStoppedBody) : displayStatus === "Processing" ? currentStep : t.project.unavailable}</p></div>}
             </div>
 
-            {displayStatus === "Processing" && (renderStatus || assemblyProgress) && <div className="mt-6 rounded-[24px] border border-[#251811]/10 bg-white p-5 shadow-[0_16px_40px_rgba(17,37,30,.04)] sm:p-6"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#825E49]">{t.project.productionProgress}</p><h2 className="serif mt-2 text-3xl tracking-[-.04em]">{isAssembling ? t.project.finalStitch : t.project.buildingFilm}</h2></div><span className="text-2xl font-bold tracking-[-.05em] text-[#71472F]">{progress}%</span></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[#EDE4DF]"><div className="h-full rounded-full bg-[#976141] transition-all duration-500" style={{ width: `${progress}%` }} /></div><div className="mt-3 flex items-center justify-between gap-3 text-xs text-[#89807B]"><span>{currentStep}</span><span>{completedShots}/{data.mediaUrls.length} {t.project.clipsLabel}</span></div><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">{shots.map(shot => <div key={shot.index} className={`rounded-xl border p-2 ${shot.state === "complete" ? "border-[#D9B7A4] bg-[#F7ECE5]" : shot.state === "failed" ? "border-[#E6C4B0] bg-[#FFEFE5]" : shot.state === "rendering" ? "border-[#E4C8B8] bg-[#FFF4ED]" : "border-[#E9E4E1] bg-[#FAF8F7]"}`}><div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-[#E8E2DE]"><img src={shot.sourceUrl} className="h-full w-full object-cover" alt={`${t.project.shotLabel} ${shot.index + 1}`} />{shot.state === "complete" && <span className="absolute end-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-[#E9C6B2] text-[#6B422A]"><CheckCircle2 size={12} /></span>}{shot.state === "rendering" && <span className="absolute end-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-[#835338]"><Loader2 size={12} className="animate-spin" /></span>}</div><p className="mt-2 truncate text-[10px] font-bold text-[#65564E]">{shot.roomType}</p><p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[#877F7A]">{shot.prompt}</p></div>)}</div></div>}
-            {isFailed && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E6C4B0] bg-[#FFEFE5] px-4 py-3 text-sm leading-6 text-[#94522C]"><span>{renderStatus?.error || t.project.falIncomplete}</span></div>}
-            {renderError && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E6C4B0] bg-[#FFEFE5] px-4 py-3 text-sm leading-6 text-[#94522C]"><span>{renderError}</span><button onClick={() => { setAssemblyProgress(null); void assembleFinalReel(); }} className="rounded-lg bg-[#94522C] px-3 py-1.5 text-xs font-bold text-white">{t.project.tryAgain}</button></div>}
+            {displayStatus === "Processing" && renderStatus && <div className="mt-6 rounded-[24px] border border-[#251811]/10 bg-white p-5 shadow-[0_16px_40px_rgba(17,37,30,.04)] sm:p-6"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#825E49]">{t.project.productionProgress}</p><h2 className="serif mt-2 text-3xl tracking-[-.04em]">{isAssembling ? t.project.finalStitch : t.project.buildingFilm}</h2></div><span className="text-2xl font-bold tracking-[-.05em] text-[#71472F]">{progress}%</span></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[#EDE4DF]"><div className="h-full rounded-full bg-[#976141] transition-all duration-500" style={{ width: `${progress}%` }} /></div><div className="mt-3 flex items-center justify-between gap-3 text-xs text-[#89807B]"><span>{currentStep}</span><span>{completedShots}/{data.mediaUrls.length} {t.project.clipsLabel}</span></div><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">{shots.map(shot => <div key={shot.index} className={`rounded-xl border p-2 ${shot.state === "complete" ? "border-[#D9B7A4] bg-[#F7ECE5]" : shot.state === "failed" ? "border-[#E6C4B0] bg-[#FFEFE5]" : shot.state === "rendering" ? "border-[#E4C8B8] bg-[#FFF4ED]" : "border-[#E9E4E1] bg-[#FAF8F7]"}`}><div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-[#E8E2DE]"><img src={shot.sourceUrl} className="h-full w-full object-cover" alt={`${t.project.shotLabel} ${shot.index + 1}`} />{shot.state === "complete" && <span className="absolute end-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-[#E9C6B2] text-[#6B422A]"><CheckCircle2 size={12} /></span>}{shot.state === "rendering" && <span className="absolute end-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-[#835338]"><Loader2 size={12} className="animate-spin" /></span>}</div><p className="mt-2 truncate text-[10px] font-bold text-[#65564E]">{shot.roomType}</p><p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[#877F7A]">{shot.prompt}</p></div>)}</div></div>}
+            {isFailed && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E6C4B0] bg-[#FFEFE5] px-4 py-3 text-sm leading-6 text-[#94522C]"><span>{renderStatus?.error || t.project.falIncomplete}</span>{failedClips === 0 && <button disabled={resume.isPending} onClick={() => resume.mutate({ id })} className="rounded-lg bg-[#94522C] px-3 py-1.5 text-xs font-bold text-white disabled:opacity-60">{w.project.assembleAgain}</button>}</div>}
+
+            {hasClips && (
+              <section className="mt-6 rounded-[24px] border border-[#251811]/10 bg-white p-5 shadow-[0_16px_40px_rgba(17,37,30,.04)] sm:p-6">
+                <h2 className="serif text-3xl tracking-[-.04em]">{w.project.yourClips}</h2>
+                <p className="mt-2 text-xs leading-5 text-[#80756E]">{w.project.clipsBody}</p>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  {shots.map(shot => {
+                    const isEditing = editing?.index === shot.index;
+                    const busy = regenerate.isPending && regenerate.variables?.index === shot.index;
+                    return (
+                      <div key={shot.index} className={`rounded-2xl border p-3 ${shot.state === "failed" ? "border-[#E6C4B0] bg-[#FFF6F0]" : "border-[#251811]/10 bg-[#FAF8F7]"}`}>
+                        <div className="relative aspect-video overflow-hidden rounded-xl bg-[#E8E2DE]">
+                          {shot.clipUrl
+                            ? <video src={shot.clipUrl} poster={shot.sourceUrl} controls preload="none" playsInline className="h-full w-full object-cover" />
+                            : <img src={shot.sourceUrl} className="h-full w-full object-cover" alt={`${t.project.shotLabel} ${shot.index + 1}`} />}
+                          {shot.state === "rendering" && <span className="absolute inset-0 grid place-items-center bg-white/60 text-xs font-bold text-[#6D4F3D]"><span className="flex items-center gap-2"><Loader2 size={14} className="animate-spin" />{w.project.rendering}</span></span>}
+                        </div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <p className="min-w-0 flex-1 truncate text-xs font-bold text-[#4C3B31]">{shot.index + 1}. {shot.roomType} · {shot.seconds}s</p>
+                          {shot.clipUrl && <a href={shot.clipUrl} target="_blank" rel="noreferrer" download className="flex h-8 items-center gap-1.5 rounded-lg border border-[#251811]/12 px-2.5 text-[11px] font-bold text-[#503F35] hover:bg-white"><Download size={13} />{w.project.downloadClip}</a>}
+                          {shot.state !== "rendering" && !isEditing && <button type="button" onClick={() => setEditing({ index: shot.index, prompt: shot.customPrompt, seconds: shot.seconds })} className="flex h-8 items-center gap-1.5 rounded-lg bg-[#251811] px-2.5 text-[11px] font-bold text-white"><RefreshCw size={13} />{shot.state === "failed" ? w.project.retry : w.project.regenerate}</button>}
+                        </div>
+                        {shot.state === "failed" && <p className="mt-1.5 text-[11px] font-semibold leading-4 text-[#94522C]">{w.project.failedRefunded}</p>}
+                        {isEditing && editing && (
+                          <div className="mt-3 rounded-xl border border-[#251811]/10 bg-white p-2.5">
+                            <textarea value={editing.prompt} onChange={event => setEditing({ ...editing, prompt: event.target.value })} placeholder={w.project.promptPlaceholder} rows={3} maxLength={2300} className="w-full resize-none bg-transparent text-xs leading-5 text-[#604E44] outline-none placeholder:text-[#A49E9A]" />
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              {([5, 10] as const).map(seconds => <button key={seconds} type="button" onClick={() => setEditing({ ...editing, seconds })} className={`h-7 rounded-full px-2.5 text-[10px] font-bold ${editing.seconds === seconds ? "bg-[#251811] text-white" : "bg-[#F3EBE7] text-[#795E4E]"}`}>{seconds}s</button>)}
+                              <button type="button" onClick={() => setEditing(null)} className="ms-auto h-8 rounded-lg px-2.5 text-[11px] font-bold text-[#7D736D]">{w.project.cancel}</button>
+                              <button type="button" disabled={busy} onClick={() => regenerate.mutate({ id, index: shot.index, prompt: editing.prompt.trim() || null, durationSeconds: editing.seconds })} className="flex h-8 items-center gap-1.5 rounded-lg bg-[#976141] px-3 text-[11px] font-bold text-white disabled:opacity-60">{busy && <Loader2 size={13} className="animate-spin" />}{w.project.regenerateFor} {clipCost(editing.seconds)} {w.credits}</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
           </div>
 
           <aside className="h-fit rounded-[27px] border border-[#251811]/10 bg-white p-6 shadow-[0_16px_40px_rgba(17,37,30,.05)]">
             <p className="text-xs font-bold uppercase tracking-[.15em] text-[#825E49]">{t.project.delivery}</p>
             <h2 className="serif mt-3 text-3xl tracking-[-.04em]">{t.project.overview}</h2>
             <div className="mt-7 rounded-2xl bg-[#F3EDE9] p-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white text-[#6B4F3F]"><Clock3 size={17} /></span><div><p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#807975]">{t.project.estimate}</p><p className="mt-0.5 text-sm font-bold text-[#47362C]">{estimate(displayStatus, locale)}</p></div></div></div>
-            {displayStatus === "Processing" && <div className="mt-4 rounded-2xl border border-[#D9BDAD] bg-[#F8EEE8] p-4"><div className="flex items-center gap-2 text-xs font-bold text-[#6C4935]"><Sparkles size={15} />{isAssembling ? t.project.finalAssembly : t.project.falProduction}</div><p className="mt-2 text-xs leading-5 text-[#80756E]">{isAssembling ? t.project.assemblyBody : t.project.falProductionBody}</p></div>}
+            {displayStatus === "Processing" && !isFailed && <div className="mt-4 rounded-2xl border border-[#D9BDAD] bg-[#F8EEE8] p-4"><div className="flex items-center gap-2 text-xs font-bold text-[#6C4935]"><Sparkles size={15} />{isAssembling ? t.project.finalAssembly : t.project.falProduction}</div><p className="mt-2 text-xs leading-5 text-[#80756E]">{isAssembling ? w.project.assemblyBody : t.project.falProductionBody}</p></div>}
             {canDeliver && <div className="mt-4 rounded-2xl border border-[#D29D7F] bg-[#F8EDE6] px-4 py-3 text-sm font-semibold leading-6 text-[#67412B]"><div className="flex items-center gap-2"><CheckCircle2 size={16} />{t.project.reelReadyBanner}</div></div>}
             {deliveryNotice && <div role="status" className="mt-4 rounded-2xl border border-[#D29D7F] bg-[#F8EDE6] px-4 py-3 text-sm font-semibold leading-6 text-[#67412B]">{deliveryNotice}</div>}
             {data.revisionNotes && <div className="mt-4 rounded-2xl border border-[#E2CABC] bg-[#FFF4ED] p-4"><p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#84614D]">{t.project.requestNotes}</p><p className="mt-2 text-sm leading-6 text-[#6D584C]">{data.revisionNotes}</p></div>}
-            <div className="mt-6 grid gap-2"><button disabled={!canDeliver} onClick={download} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white transition hover:bg-[#402E24] disabled:cursor-not-allowed disabled:bg-[#E9E4E1] disabled:text-[#A09A97]"><Download size={16} />{t.project.download}</button><button onClick={share} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[#251811]/12 text-sm font-bold text-[#503F35] transition hover:bg-[#F6F2EF]"><Share2 size={16} />{t.project.share}</button></div>
-            <div className="mt-6 flex items-center gap-2 border-t border-[#251811]/8 pt-5 text-xs text-[#877F7A]"><Link2 size={14} />{t.project.privateLink}<span className="ms-auto text-[10px] font-bold uppercase tracking-[.1em] text-[#AAA4A0]">{data.mediaUrls.length} {t.project.framesLabel}</span></div>
+            <div className="mt-6 grid gap-2"><button disabled={!canDeliver} onClick={download} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[#251811] text-sm font-bold text-white transition hover:bg-[#402E24] disabled:cursor-not-allowed disabled:bg-[#E9E4E1] disabled:text-[#A09A97]"><Download size={16} />{t.project.download}</button><button disabled={!canDeliver || shareLink.isPending} onClick={share} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[#251811]/12 text-sm font-bold text-[#503F35] transition hover:bg-[#F6F2EF] disabled:cursor-not-allowed disabled:opacity-50"><Share2 size={16} />{t.project.share}</button></div>
+            <div className="mt-6 flex items-center gap-2 border-t border-[#251811]/8 pt-5 text-xs text-[#877F7A]"><Link2 size={14} />{data.shareToken ? w.project.publicLink : w.project.privateUntilShared}{data.shareToken ? <button onClick={() => unshare.mutate({ id })} className="ms-auto text-[11px] font-bold text-[#825E49] underline">{w.project.stopSharing}</button> : <span className="ms-auto text-[10px] font-bold uppercase tracking-[.1em] text-[#AAA4A0]">{data.mediaUrls.length} {t.project.framesLabel}</span>}</div>
           </aside>
         </div>
       </main>

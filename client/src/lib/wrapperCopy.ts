@@ -1,0 +1,106 @@
+// Copy for credits, customer-written prompts, per-clip controls, checkout and public share pages.
+import type { Locale } from "./locale";
+
+const en = {
+  credits: "credits",
+  creditsLeft: "credits left",
+  addCredits: "Add credits",
+  creditRule: "1 credit = 1 second of video",
+  review: {
+    guided: "Guided",
+    ownPrompt: "My own prompt",
+    ownPromptPlaceholder: "Write the whole shot yourself: camera, action, mood. It is sent to the AI exactly as written.",
+    ownPromptHint: "Your prompt replaces our real-estate direction for this photo.",
+    cost: "This render uses",
+    balance: "You have",
+    notEnough: "Not enough credits for this render.",
+  },
+  project: {
+    yourClips: "Your clips",
+    clipsBody: "Every clip is yours. Download any of them, or re-roll one with a new prompt or length.",
+    downloadClip: "Download",
+    regenerate: "Re-roll",
+    retry: "Retry",
+    rendering: "Rendering…",
+    failedRefunded: "Failed. Credits refunded.",
+    promptPlaceholder: "New prompt for this clip. Leave empty to use guided direction.",
+    regenerateFor: "Re-roll for",
+    cancel: "Cancel",
+    assemblyBody: "Your clips are being joined on our servers. You can close this page and the reel will be waiting when you come back.",
+    assembleAgain: "Assemble again",
+    shareCopied: "Public watch link copied.",
+    privateUntilShared: "Private until you share",
+    publicLink: "Anyone with the link can watch",
+    stopSharing: "Stop sharing",
+    sharingStopped: "The public link no longer works.",
+  },
+  pricing: {
+    body: "You pay for the seconds of video you generate. Write your own prompts, re-roll any clip, download everything.",
+    trial: "New accounts start with 30 free credits. No card needed.",
+    opening: "Opening checkout…",
+    plans: [
+      { id: "starter", name: "Starter", price: "$89", tagline: "For focused launches", features: ["300 credits every month", "About 3 full 10-clip reels", "Your own prompts on any clip", "Download every clip and the final reel", "Unused credits roll over"] },
+      { id: "pro", name: "Pro", price: "$229", tagline: "For agents with regular volume", features: ["800 credits every month", "About 8 full 10-clip reels", "Your own prompts on any clip", "Download every clip and the final reel", "Unused credits roll over"] },
+      { id: "agency", name: "Agency", price: "$499", tagline: "For growing property teams", features: ["2,000 credits every month", "About 20 full 10-clip reels", "Your own prompts on any clip", "Download every clip and the final reel", "Unused credits roll over"] },
+    ],
+    rows: ["Credits per month", "Full 10-clip reels", "Price per second of video"],
+  },
+  shared: {
+    unavailable: "This reel is no longer available.",
+    madeWith: "Made with reel-listing.com",
+    makeYours: "Turn your listing photos into a reel",
+  },
+};
+
+const ar: typeof en = {
+  credits: "رصيد",
+  creditsLeft: "رصيد متبقٍ",
+  addCredits: "أضف رصيداً",
+  creditRule: "رصيد واحد = ثانية واحدة من الفيديو",
+  review: {
+    guided: "موجَّه",
+    ownPrompt: "وصفي الخاص",
+    ownPromptPlaceholder: "اكتب اللقطة كاملة بنفسك: حركة الكاميرا، الحدث، الأجواء. يُرسل النص إلى الذكاء الاصطناعي كما كتبته تماماً.",
+    ownPromptHint: "وصفك يستبدل توجيهنا العقاري لهذه الصورة.",
+    cost: "يستهلك هذا التصيير",
+    balance: "لديك",
+    notEnough: "الرصيد غير كافٍ لهذا التصيير.",
+  },
+  project: {
+    yourClips: "مقاطعك",
+    clipsBody: "كل مقطع ملك لك. حمّل أي مقطع، أو أعد توليده بوصف أو مدة جديدة.",
+    downloadClip: "تحميل",
+    regenerate: "إعادة توليد",
+    retry: "إعادة المحاولة",
+    rendering: "جارٍ التصيير…",
+    failedRefunded: "فشل المقطع. تم استرداد الرصيد.",
+    promptPlaceholder: "وصف جديد لهذا المقطع. اتركه فارغاً لاستخدام التوجيه التلقائي.",
+    regenerateFor: "إعادة التوليد مقابل",
+    cancel: "إلغاء",
+    assemblyBody: "يتم دمج مقاطعك على خوادمنا. يمكنك إغلاق الصفحة وسيكون الفيلم جاهزاً عند عودتك.",
+    assembleAgain: "أعد الدمج",
+    shareCopied: "تم نسخ رابط المشاهدة العام.",
+    privateUntilShared: "خاص حتى تشاركه",
+    publicLink: "يمكن لأي شخص لديه الرابط المشاهدة",
+    stopSharing: "إيقاف المشاركة",
+    sharingStopped: "الرابط العام لم يعد يعمل.",
+  },
+  pricing: {
+    body: "تدفع مقابل ثواني الفيديو التي تولّدها. اكتب أوصافك الخاصة، أعد توليد أي مقطع، وحمّل كل شيء.",
+    trial: "تبدأ الحسابات الجديدة بـ30 رصيداً مجانياً. لا حاجة لبطاقة.",
+    opening: "جارٍ فتح صفحة الدفع…",
+    plans: [
+      { id: "starter", name: "Starter", price: "$89", tagline: "لإطلاقات مركزة", features: ["300 رصيد كل شهر", "نحو 3 أفلام كاملة من 10 مقاطع", "أوصافك الخاصة لأي مقطع", "تحميل كل مقطع والفيلم النهائي", "الرصيد غير المستخدم يُرحَّل"] },
+      { id: "pro", name: "Pro", price: "$229", tagline: "للوكلاء ذوي الإنتاج المنتظم", features: ["800 رصيد كل شهر", "نحو 8 أفلام كاملة من 10 مقاطع", "أوصافك الخاصة لأي مقطع", "تحميل كل مقطع والفيلم النهائي", "الرصيد غير المستخدم يُرحَّل"] },
+      { id: "agency", name: "Agency", price: "$499", tagline: "لفرق العقارات المتنامية", features: ["2,000 رصيد كل شهر", "نحو 20 فيلماً كاملاً من 10 مقاطع", "أوصافك الخاصة لأي مقطع", "تحميل كل مقطع والفيلم النهائي", "الرصيد غير المستخدم يُرحَّل"] },
+    ],
+    rows: ["الرصيد شهرياً", "أفلام كاملة من 10 مقاطع", "سعر ثانية الفيديو"],
+  },
+  shared: {
+    unavailable: "هذا الفيلم لم يعد متاحاً.",
+    madeWith: "صُنع عبر reel-listing.com",
+    makeYours: "حوّل صور عقارك إلى فيلم",
+  },
+};
+
+export const wrapperCopy: Record<Locale, typeof en> = { en, ar };
