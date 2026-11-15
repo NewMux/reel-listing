@@ -26,6 +26,9 @@ export const ENV = {
   },
   // The stable production domain, used to build callback URLs (e.g. fal.ai webhooks) that
   // must keep working across redeploys -- deliberately not derived from Vercel's per-deployment URL.
+  // Vercel sends it as `Authorization: Bearer <CRON_SECRET>` on scheduled calls. Without it the
+  // stalled-render sweep refuses every request.
+  cronSecret: process.env.CRON_SECRET ?? "",
   publicUrl: process.env.PUBLIC_URL ?? "https://reel-listing.com",
   upstashRedisUrl: process.env.UPSTASH_REDIS_REST_URL ?? "",
   upstashRedisToken: process.env.UPSTASH_REDIS_REST_TOKEN ?? "",

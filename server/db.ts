@@ -1,6 +1,6 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { and, desc, eq, gt, gte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm";
 import { contactMessages, creditLedger, InsertContactMessage, InsertUser, InsertVideoProject, users, videoProjects } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -175,6 +175,28 @@ export async function getVideoProject(userId: number, projectId: number) {
 }
 
 /** Finds the in-progress project a fal.ai request_id belongs to, for webhook-triggered refreshes that have no user session to scope the lookup by. */
+/**
+ * Renders that are mid-flight but haven't been advanced since `cutoff` -- e.g. a fal.ai webhook
+ * was lost and nobody has the project page open. Oldest first. Failed renders are excluded:
+ * they wait for the customer.
+ */
+export async function listStalledRenders(cutoff: Date, limit: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(videoProjects)
+    .where(
+      and(
+        eq(videoProjects.status, "Processing"),
+        inArray(videoProjects.renderPhase, ["generating", "assembly"]),
+        lt(videoProjects.updatedAt, cutoff),
+      ),
+    )
+    .orderBy(asc(videoProjects.updatedAt))
+    .limit(limit);
+}
+
 export async function getVideoProjectByRequestId(requestId: string) {
   const db = await getDb();
   if (!db) return undefined;
